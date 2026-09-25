@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Signal Foundry 色板 · 深色主题(Carbon 控制面) -->
+<resources>
+    <color name="colorBackground">#111417</color>
+    <color name="colorPanel">#1B2025</color>
+    <color name="colorPanelAlt">#2C333A</color>
+    <color name="colorTextPrimary">#F2F3EE</color>
+    <color name="colorTextSecondary">#707980</color>
+    <color name="colorLine">#2C333A</color>
+
+    <color name="colorLime">#E7FF16</color>
+    <color name="colorOnLime">#15181B</color>
+</resources>

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Signal Foundry 色板 · 浅色主题(深色见 values-night)。
+     语义规则(设计文档 §5.3):单屏一种主信号色;Lime=已连接/主操作,
+     Cyan=数据流动,Amber=待确认,Coral=失败;Lime 上必须用 Ink 深字。 -->
+<resources>
+    <color name="colorBackground">#F2F3EE</color>
+    <color name="colorPanel">#FFFFFF</color>
+    <color name="colorPanelAlt">#DDE0DA</color>
+    <color name="colorTextPrimary">#15181B</color>
+    <color name="colorTextSecondary">#707980</color>
+    <color name="colorLine">#DDE0DA</color>
+
+    <color name="colorLime">#C5D400</color>
+    <color name="colorOnLime">#15181B</color>
+    <color name="colorCyan">#25C7E8</color>
+    <color name="colorAmber">#FFB020</color>
+    <color name="colorCoral">#FF5B55</color>
+</resources>

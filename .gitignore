@@ -1,0 +1,41 @@
+# ---- 构建产物 ----
+.build/
+DerivedData/
+*.app
+android/build/
+ios/DerivedData/
+
+# ---- 生成文件(xcodegen 重新生成;用户签名 Team 配置不进仓库) ----
+*.xcodeproj
+ios/DerivedData/
+
+# ---- SwiftPM / IDE ----
+.swiftpm/
+.vscode/
+.idea/
+
+# ---- 签名与密钥 ----
+android/debug.keystore
+*.p12
+*.cer
+*.mobileprovision
+
+# ---- 本地隐私笔记(UDID/邮箱/内网 IP,勿公开) ----
+docs/dev/
+
+# ---- 系统与临时 ----
+.DS_Store
+*.bak
+*.bak-*
+.claude/
+.zcode/
+
+# ---- 日志 ----
+*.log
+
+# ---- Compose scaffold 构建产物 ----
+android-compose-scaffold/.gradle/
+android-compose-scaffold/build/
+android-compose-scaffold/app/build/
+android-compose-scaffold/app/.cxx/
+android-compose-scaffold/local.properties

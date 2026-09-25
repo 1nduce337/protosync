@@ -1,0 +1,319 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 单页指挥面板(设计文档 §8.2):Header → 主操作 → 传输卡(按需) →
+     设备 / 附近 / 活动 → 默认折叠的高级连接与诊断 -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:fillViewport="true"
+    android:background="@color/colorBackground">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <!-- ══ System Header ══ -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <ImageView
+                android:id="@+id/logo"
+                android:layout_width="30dp"
+                android:layout_height="30dp"
+                android:contentDescription="ProtoSync logo" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="10dp"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="ProtoSync"
+                    android:textColor="@color/colorTextPrimary"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/statusText"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="引擎启动中…"
+                    android:textColor="@color/colorTextSecondary"
+                    android:textSize="12sp"
+                    android:fontFamily="monospace" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:gravity="end">
+
+                <TextView
+                    android:id="@+id/onlineCount"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="00"
+                    android:textColor="@color/colorTextPrimary"
+                    android:textSize="36sp"
+                    android:fontFeatureSettings="tnum"
+                    android:includeFontPadding="false" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="台在线 // ONLINE"
+                    android:textColor="@color/colorTextSecondary"
+                    android:textSize="10sp"
+                    android:letterSpacing="0.1"
+                    android:fontFamily="monospace" />
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/scanButton"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:minWidth="48dp"
+                android:minHeight="48dp"
+                android:text="SCAN"
+                android:textAllCaps="false"
+                android:textColor="@color/colorTextPrimary"
+                android:background="@drawable/btn_secondary" />
+        </LinearLayout>
+
+        <!-- ══ 主操作 ══ -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/sendClipboardButton"
+                android:layout_width="0dp"
+                android:layout_height="52dp"
+                android:layout_weight="1"
+                android:text="发送剪贴板"
+                android:textAllCaps="false"
+                android:textColor="@color/colorOnLime"
+                android:textStyle="bold"
+                android:background="@drawable/btn_primary" />
+
+            <Button
+                android:id="@+id/sendFileButton"
+                android:layout_width="0dp"
+                android:layout_height="52dp"
+                android:layout_weight="1"
+                android:layout_marginStart="10dp"
+                android:text="发送文件"
+                android:textAllCaps="false"
+                android:textColor="@color/colorTextPrimary"
+                android:background="@drawable/btn_secondary" />
+        </LinearLayout>
+
+        <!-- ══ 传输任务(Transfer Track,有任务才可见)══ -->
+        <LinearLayout
+            android:id="@+id/transferCard"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:orientation="vertical"
+            android:padding="14dp"
+            android:background="@drawable/bg_panel"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="传输任务 // TRANSFER"
+                android:textColor="@color/colorTextSecondary"
+                android:textSize="11sp"
+                android:letterSpacing="0.1"
+                android:fontFamily="monospace" />
+
+            <com.protosync.app.TransferTrackView
+                android:id="@+id/transferTrack"
+                android:layout_width="match_parent"
+                android:layout_height="72dp"
+                android:layout_marginTop="8dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="6dp"
+                android:orientation="horizontal">
+
+                <TextView
+                    android:id="@+id/transferName"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:ellipsize="middle"
+                    android:singleLine="true"
+                    android:textColor="@color/colorTextPrimary"
+                    android:textSize="14sp" />
+
+                <TextView
+                    android:id="@+id/transferPercent"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="0%"
+                    android:textColor="@color/colorTextPrimary"
+                    android:textSize="16sp"
+                    android:fontFeatureSettings="tnum" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/transferMore"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:textColor="@color/colorTextSecondary"
+                android:textSize="11sp"
+                android:visibility="gone" />
+        </LinearLayout>
+
+        <!-- ══ 已配对设备 ══ -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="已配对设备 // DEVICES"
+            android:textColor="@color/colorTextSecondary"
+            android:textSize="11sp"
+            android:letterSpacing="0.1"
+            android:fontFamily="monospace" />
+
+        <LinearLayout
+            android:id="@+id/deviceList"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="vertical" />
+
+        <!-- ══ 附近设备 ══ -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="附近的设备 // NEARBY"
+            android:textColor="@color/colorTextSecondary"
+            android:textSize="11sp"
+            android:letterSpacing="0.1"
+            android:fontFamily="monospace" />
+
+        <LinearLayout
+            android:id="@+id/nearbyList"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="vertical" />
+
+        <!-- ══ 活动 ══ -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="流转记录 // ACTIVITY"
+            android:textColor="@color/colorTextSecondary"
+            android:textSize="11sp"
+            android:letterSpacing="0.1"
+            android:fontFamily="monospace" />
+
+        <LinearLayout
+            android:id="@+id/activityList"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="6dp"
+            android:orientation="vertical" />
+
+        <!-- ══ 高级连接与诊断(默认折叠)══ -->
+        <TextView
+            android:id="@+id/diagToggle"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:layout_marginTop="16dp"
+            android:gravity="center_vertical"
+            android:text="高级连接与诊断 ▸"
+            android:textColor="@color/colorTextSecondary"
+            android:textSize="13sp" />
+
+        <LinearLayout
+            android:id="@+id/diagPanel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="12dp"
+            android:background="@drawable/bg_panel"
+            android:visibility="gone">
+
+            <TextView
+                android:id="@+id/fingerprintText"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:textColor="@color/colorTextSecondary"
+                android:textSize="11sp"
+                android:fontFamily="monospace" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:orientation="horizontal">
+
+                <EditText
+                    android:id="@+id/manualInput"
+                    android:layout_width="0dp"
+                    android:layout_height="48dp"
+                    android:layout_weight="1"
+                    android:hint="手动连接 IP:端口(mDNS 受限时)"
+                    android:textSize="12sp"
+                    android:textColor="@color/colorTextPrimary"
+                    android:textColorHint="@color/colorTextSecondary"
+                    android:inputType="text" />
+
+                <Button
+                    android:id="@+id/connectButton"
+                    android:layout_width="wrap_content"
+                    android:layout_height="48dp"
+                    android:layout_marginStart="8dp"
+                    android:text="连接"
+                    android:textAllCaps="false"
+                    android:textColor="@color/colorTextPrimary"
+                    android:background="@drawable/btn_secondary" />
+            </LinearLayout>
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:text="原始日志 // LOG"
+                android:textColor="@color/colorTextSecondary"
+                android:textSize="11sp"
+                android:letterSpacing="0.1"
+                android:fontFamily="monospace" />
+
+            <ScrollView
+                android:layout_width="match_parent"
+                android:layout_height="160dp"
+                android:layout_marginTop="4dp">
+
+                <TextView
+                    android:id="@+id/logView"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:textColor="@color/colorTextSecondary"
+                    android:textSize="10sp"
+                    android:fontFamily="monospace" />
+            </ScrollView>
+        </LinearLayout>
+    </LinearLayout>
+</ScrollView>
