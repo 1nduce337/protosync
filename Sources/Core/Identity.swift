@@ -37,6 +37,10 @@ public final class IdentityStore {
         public var fingerprint: String
         public var name: String
         public var addedAt: Date
+        /// 文件自动接收。nil(旧版 paired.json 没有该字段)按信任处理,保持升级前的免确认行为。
+        public var trustFiles: Bool? = nil
+
+        public var filesTrusted: Bool { trustFiles ?? true }
     }
 
     public init(directory: URL? = nil, deviceName: String? = nil) throws {
@@ -101,6 +105,24 @@ public final class IdentityStore {
     public func pairedDevice(_ fingerprint: String) -> PairedDevice? {
         lock.lock(); defer { lock.unlock() }
         return pairedDevices.first { $0.fingerprint == fingerprint }
+    }
+
+    /// 已配对且允许免确认接收文件。未配对设备根本无法建立连接,这里一并返回 false。
+    public func isFileTrusted(_ fingerprint: String) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return pairedDevices.first { $0.fingerprint == fingerprint }?.filesTrusted ?? false
+    }
+
+    public func setFileTrust(fingerprint: String, trusted: Bool) {
+        lock.lock()
+        guard let idx = pairedDevices.firstIndex(where: { $0.fingerprint == fingerprint }) else {
+            lock.unlock()
+            return
+        }
+        pairedDevices[idx].trustFiles = trusted
+        let snapshot = pairedDevices
+        lock.unlock()
+        persistPaired(snapshot)
     }
 
     public func addPaired(fingerprint: String, name: String) {

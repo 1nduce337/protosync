@@ -5,15 +5,19 @@ import CryptoKit
 ///
 ///   C → S : hello {fpC, nameC, signPubC, dhPubC, ephC}
 ///   S → C : hello {fpS, nameS, signPubS, dhPubS, ephS}
-///   C → S : auth  {sig = Sign_staticC(transcriptHash)}
-///   S → C : auth  {sig = Sign_staticS(transcriptHash)}
+///   C → S : auth  {sig = Sign_staticC("protosync-auth-initiator" || transcriptHash)}
+///   S → C : auth  {sig = Sign_staticS("protosync-auth-responder" || transcriptHash)}
 ///
-/// transcriptHash = SHA256("ProtoSync-v1" || init 的三个公钥 || resp 的三个公钥)
+/// transcriptHash = SHA256("ProtoSync-v2" || init 的三个公钥 || len32(nameI) || nameI
+///                                        || resp 的三个公钥 || len32(nameR) || nameR)
+/// (len32 = UTF-8 字节长度,4 字节大端)
 /// 会话密钥 = HKDF-256(ss1 || ss2 || ss3, salt: transcriptHash)
 ///   ss1 = DH(ephI, ephR)   ss2 = DH(ephI, staticR)   ss3 = DH(staticI, ephR)
 ///
 /// 三个共享密钥混合后同时提供前向安全与对静态身份的绑定;对端公钥的指纹必须与
 /// hello 中声称的 fp 一致,签名必须能用该公钥验证,否则握手失败。
+/// 设备名进入 transcript,中间人无法篡改 hello 里的名字;签名带角色标签,
+/// 一端的 auth 不能被反射回去冒充另一个角色。
 public final class SecureChannel {
     public enum Role { case initiator, responder }
 
@@ -55,6 +59,9 @@ public final class SecureChannel {
     public func acceptPeerHello(_ message: Message) throws {
         // responder 先收到 hello,此时还没有自己的临时密钥,在此生成。
         if myEph == nil { myEph = P256.KeyAgreement.PrivateKey() }
+        guard message.v == ProtocolVersion.current else {
+            throw ProtoSyncError.versionMismatch(message.v)
+        }
         guard let fp = message.fp,
               let name = message.name,
               let signPubB64 = message.signPub, let signPubData = Data(base64Encoded: signPubB64),
@@ -77,30 +84,14 @@ public final class SecureChannel {
         peerDhPub = dhPub
 
         let myStaticDh = identity.dhKey
-        let initiator: (sign: Data, dh: Data, eph: Data)
-        let responder: (sign: Data, dh: Data, eph: Data)
-        switch role {
-        case .initiator:
-            initiator = (identity.signingKey.publicKey.rawRepresentation,
-                         identity.dhKey.publicKey.rawRepresentation,
-                         myEph.publicKey.rawRepresentation)
-            responder = (signPubData, dhPubData, ephData)
-        case .responder:
-            responder = (identity.signingKey.publicKey.rawRepresentation,
-                         identity.dhKey.publicKey.rawRepresentation,
-                         myEph.publicKey.rawRepresentation)
-            initiator = (signPubData, dhPubData, ephData)
-        }
-
-        var hasher = SHA256()
-        hasher.update(data: Data("ProtoSync-v1".utf8))
-        hasher.update(data: initiator.sign)
-        hasher.update(data: initiator.dh)
-        hasher.update(data: initiator.eph)
-        hasher.update(data: responder.sign)
-        hasher.update(data: responder.dh)
-        hasher.update(data: responder.eph)
-        transcriptHash = Data(hasher.finalize())
+        let me = (sign: identity.signingKey.publicKey.rawRepresentation,
+                  dh: identity.dhKey.publicKey.rawRepresentation,
+                  eph: myEph.publicKey.rawRepresentation,
+                  name: identity.name)
+        let peer = (sign: signPubData, dh: dhPubData, eph: ephData, name: name)
+        transcriptHash = role == .initiator
+            ? Self.transcript(initiator: me, responder: peer)
+            : Self.transcript(initiator: peer, responder: me)
 
         let ss1 = try myEph.sharedSecretFromKeyAgreement(with: peerEph)
         let ss2: SharedSecret
@@ -128,7 +119,7 @@ public final class SecureChannel {
         guard let transcriptHash = transcriptHash else {
             throw ProtoSyncError.badHandshake("尚未收到对端 hello")
         }
-        let sig = try identity.signingKey.signature(for: transcriptHash)
+        let sig = try identity.signingKey.signature(for: Self.authPayload(signer: role, transcriptHash: transcriptHash))
         return Message.auth(sig: sig.rawRepresentation)
     }
 
@@ -139,13 +130,41 @@ public final class SecureChannel {
               let peerSignPub = peerSignPub
         else { throw ProtoSyncError.badHandshake("auth 字段缺失") }
         func hex(_ d: Data) -> String { d.map { String(format: "%02x", $0) }.joined() }
+        let peerRole: Role = role == .initiator ? .responder : .initiator
+        let payload = Self.authPayload(signer: peerRole, transcriptHash: transcriptHash)
         guard let sig = try? P256.Signing.ECDSASignature(rawRepresentation: sigData),
-              peerSignPub.isValidSignature(sig, for: transcriptHash)
+              peerSignPub.isValidSignature(sig, for: payload)
         else {
             let selfEph = myEph?.publicKey.rawRepresentation.map { String(format: "%02x", $0) }.joined() ?? "nil"
-            PLog.error("ProtoSync: AUTH_VERIFY_FAIL role=\(role == .initiator ? "I" : "R") selfSign=\(hex(identity.signingKey.publicKey.rawRepresentation)) selfDh=\(hex(identity.dhKey.publicKey.rawRepresentation)) selfEph=\(selfEph) peerSign=\(hex(peerSignPub.rawRepresentation)) peerDh=\(hex(peerDhPub?.rawRepresentation ?? Data())) peerEph=\(hex(transcriptHash)) sig=\(hex(sigData))")
+            PLog.error("ProtoSync: AUTH_VERIFY_FAIL role=\(role == .initiator ? "I" : "R") selfSign=\(hex(identity.signingKey.publicKey.rawRepresentation)) selfDh=\(hex(identity.dhKey.publicKey.rawRepresentation)) selfEph=\(selfEph) peerSign=\(hex(peerSignPub.rawRepresentation)) peerDh=\(hex(peerDhPub?.rawRepresentation ?? Data())) transcript=\(hex(transcriptHash)) sig=\(hex(sigData))")
             throw ProtoSyncError.badSignature
         }
+    }
+
+    // MARK: - transcript / 签名载荷(与 Android Crypto.transcript / authPayload 逐字节对齐)
+
+    typealias TranscriptParty = (sign: Data, dh: Data, eph: Data, name: String)
+
+    static func transcript(initiator: TranscriptParty, responder: TranscriptParty) -> Data {
+        var hasher = SHA256()
+        hasher.update(data: Data("ProtoSync-v2".utf8))
+        for party in [initiator, responder] {
+            hasher.update(data: party.sign)
+            hasher.update(data: party.dh)
+            hasher.update(data: party.eph)
+            let nameBytes = Data(party.name.utf8)
+            var length = UInt32(nameBytes.count).bigEndian
+            hasher.update(data: withUnsafeBytes(of: &length) { Data($0) })
+            hasher.update(data: nameBytes)
+        }
+        return Data(hasher.finalize())
+    }
+
+    /// 签名载荷 = 角色标签 || transcriptHash。角色标签防止把一端的 auth 反射给它自己。
+    static func authPayload(signer: Role, transcriptHash: Data) -> Data {
+        var payload = Data((signer == .initiator ? "protosync-auth-initiator" : "protosync-auth-responder").utf8)
+        payload.append(transcriptHash)
+        return payload
     }
 
     // MARK: - 加解密

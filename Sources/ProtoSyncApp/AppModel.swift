@@ -15,6 +15,8 @@ final class AppModel: ObservableObject, SyncEngine.Delegate {
     @Published var activities: [ActivityEntry] = []
     @Published var inboxFiles: [URL] = []
     @Published var pairingRequest: PairingRequest?
+    /// 待确认的文件请求(来自未开启自动接收的设备),按到达顺序,界面展示第一个
+    @Published var fileOffers: [FileOfferPrompt] = []
     @Published var deviceName: String = ""
     @Published var isRefreshing = false
 
@@ -22,6 +24,12 @@ final class AppModel: ObservableObject, SyncEngine.Delegate {
         let id = UUID()
         let info: PeerConnection.PeerInfo
         let reply: (Bool) -> Void
+    }
+
+    struct FileOfferPrompt: Identifiable {
+        let offer: SyncEngine.FileOfferRequest
+        let reply: (Bool) -> Void
+        var id: String { offer.id }
     }
 
     struct ActivityEntry: Identifiable, Equatable {
@@ -116,6 +124,23 @@ final class AppModel: ObservableObject, SyncEngine.Delegate {
         pairingRequest = nil
     }
 
+    /// alwaysTrust:接受并对该设备开启文件自动接收,以后不再询问
+    func acceptFileOffer(_ prompt: FileOfferPrompt, alwaysTrust: Bool = false) {
+        if alwaysTrust { setFileTrust(fingerprint: prompt.offer.from.fingerprint, trusted: true) }
+        prompt.reply(true)
+        fileOffers.removeAll { $0.id == prompt.id }
+    }
+
+    func declineFileOffer(_ prompt: FileOfferPrompt) {
+        prompt.reply(false)
+        fileOffers.removeAll { $0.id == prompt.id }
+    }
+
+    func setFileTrust(fingerprint: String, trusted: Bool) {
+        engine.setFileTrust(fingerprint: fingerprint, trusted: trusted)
+        refresh()
+    }
+
     func revealInbox() {
         NSWorkspace.shared.open(engine.inboxDirectory)
     }
@@ -161,6 +186,30 @@ final class AppModel: ObservableObject, SyncEngine.Delegate {
         }
     }
 
+    func engine(_ engine: SyncEngine, fileOfferRequested offer: SyncEngine.FileOfferRequest,
+                reply: @escaping (Bool) -> Void) {
+        fileOffers.append(FileOfferPrompt(offer: offer, reply: reply))
+        // 与配对请求一致:不抢焦点,主窗口不可见时发系统通知
+        if NSApp.mainWindow == nil {
+            let content = UNMutableNotificationContent()
+            content.title = "ProtoSync 文件请求"
+            content.body = "「\(offer.from.name)」想发送「\(offer.name)」,打开主窗口处理"
+            let request = UNNotificationRequest(identifier: "file-offer-\(offer.id)", content: content, trigger: nil)
+            UNUserNotificationCenter.current().add(request)
+        }
+    }
+
+    func engine(_ engine: SyncEngine, fileOfferExpired id: String) {
+        fileOffers.removeAll { $0.id == id }
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["file-offer-\(id)"])
+    }
+
+    func engine(_ engine: SyncEngine, fileAwaitingApproval id: String, name: String) {
+        guard let entryId = transferIds[id],
+              let idx = activities.firstIndex(where: { $0.id == entryId }) else { return }
+        activities[idx].detail = "等待对方确认…"
+    }
+
     func engine(_ engine: SyncEngine, didReceiveClipboardText text: String) {
         ClipboardMonitor.write(text: text)
         appendActivity({ $0.detail = "文本 · \(text.count) 字" }, base: ActivityEntry(
@@ -191,6 +240,7 @@ final class AppModel: ObservableObject, SyncEngine.Delegate {
         guard let entryId = transferIds[id],
               let idx = activities.firstIndex(where: { $0.id == entryId }) else { return }
         activities[idx].progress = fraction
+        if activities[idx].detail == "等待对方确认…" { activities[idx].detail = "发送中…" }
     }
 
     func engine(_ engine: SyncEngine, fileTransferFinished id: String, name: String, url: URL?, error: String?, direction: SyncEngine.Direction) {

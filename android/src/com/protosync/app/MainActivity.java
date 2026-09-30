@@ -61,6 +61,8 @@ public class MainActivity extends Activity implements SyncService.Ui {
     private Button scanButton;
     private final StringBuilder logBuf = new StringBuilder();
     private android.app.AlertDialog pairingDialog;
+    private android.app.AlertDialog fileOfferDialog;
+    private String fileOfferDialogId;
     private final Handler ui = new Handler(Looper.getMainLooper());
     private boolean diagExpanded = false;
 
@@ -350,6 +352,12 @@ public class MainActivity extends Activity implements SyncService.Ui {
         if (isOnline) {
             row.addView(miniButton("发文件", v -> pickFile(fp)));
         }
+        boolean trusted = core != null && core.isFileTrusted(fp);
+        row.addView(miniButton(trusted ? "文件:自动收" : "文件:需确认", v -> {
+            if (core == null) return;
+            core.setFileTrust(fp, !trusted);
+            log(!trusted ? "已开启自动接收:" + name : name + " 的文件将先询问");
+        }));
         row.addView(miniButton("取消配对", v -> {
             if (core != null) core.removePaired(fp);
             log("已取消配对 " + name);
@@ -518,6 +526,35 @@ public class MainActivity extends Activity implements SyncService.Ui {
                 .setNegativeButton("拒绝", (d, w) -> { if (svc != null) svc.decidePairing(fp, false); })
                 .setOnCancelListener(d -> { if (svc != null) svc.decidePairing(fp, false); })
                 .show();
+    }
+
+    @Override public void onFileOfferRequested(String id, String name, long size, String fromName, String fromFp) {
+        if (fileOfferDialog != null) fileOfferDialog.dismiss();
+        fileOfferDialogId = id;
+        fileOfferDialog = new android.app.AlertDialog.Builder(this)
+                .setTitle("文件请求")
+                .setMessage("「" + fromName + "」想发送文件\n\n" + name + "\n"
+                        + android.text.format.Formatter.formatShortFileSize(this, size))
+                .setPositiveButton("接收", (d, w) -> decideOffer(id, true, false))
+                .setNegativeButton("拒绝", (d, w) -> decideOffer(id, false, false))
+                .setNeutralButton("始终接收", (d, w) -> decideOffer(id, true, true))
+                .setOnCancelListener(d -> decideOffer(id, false, false))
+                .show();
+    }
+
+    private void decideOffer(String id, boolean accept, boolean alwaysTrust) {
+        if (id.equals(fileOfferDialogId)) { fileOfferDialogId = null; fileOfferDialog = null; }
+        if (svc != null) svc.decideFileOffer(id, accept, alwaysTrust);
+    }
+
+    @Override public void onFileOfferExpired(String id) {
+        if (id.equals(fileOfferDialogId) && fileOfferDialog != null) {
+            fileOfferDialogId = null;
+            fileOfferDialog.setOnCancelListener(null);
+            fileOfferDialog.dismiss();
+            fileOfferDialog = null;
+            toast("文件请求已超时");
+        }
     }
 
     @Override public void onClipboardText(String text) {

@@ -16,6 +16,16 @@ import java.nio.charset.StandardCharsets;
  * 与 macOS Swift 端逐字节对齐(FrameCodec.maxFrameSize = 64MB)。
  */
 public final class Protocol {
+    /** 线协议版本,与 Swift ProtocolVersion.current 对齐;hello 携带,不一致直接报错。 */
+    public static final int VERSION = 2;
+
+    /** 对端协议版本不兼容(握手阶段抛出,引擎回 error 帧后断开)。 */
+    public static final class VersionMismatchException extends java.io.IOException {
+        public VersionMismatchException(int peerVersion) {
+            super("协议版本不兼容(对端 v" + (peerVersion > 0 ? peerVersion : 1) + ",本机 v" + VERSION
+                    + "),请把所有设备更新到最新版本");
+        }
+    }
     public static final String TYPE_HELLO = "hello";
     public static final String TYPE_AUTH = "auth";
     public static final String TYPE_CLIPBOARD = "clipboard";

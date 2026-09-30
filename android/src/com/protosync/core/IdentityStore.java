@@ -24,7 +24,8 @@ import java.util.Map;
  * 身份与信任持久化(与旧版文件格式完全兼容,换 APK 不掉指纹、不用重新配对):
  * - files/identity/device.key:192B = signPriv32 ‖ dhPriv32 ‖ signPub64 ‖ dhPub64
  *   (JCA 无法从裸私钥导出公钥,公钥一并持久化)
- * - files/identity/paired.json:[{"fp":"…","name":"…"}]
+ * - files/identity/paired.json:[{"fp":"…","name":"…","trustFiles":false?}]
+ *   (trustFiles 缺省 = 信任,旧文件升级后行为不变;只持久化关闭的情况)
  * - files/identity/lastaddr.json:{"<fp>":"host:port"}
  */
 public final class IdentityStore {
@@ -36,6 +37,7 @@ public final class IdentityStore {
 
     private final List<String[]> paired = new ArrayList<>();          // {fp, name}
     private final Map<String, String> lastAddr = new LinkedHashMap<>(); // fp -> host:port
+    private final java.util.Set<String> filesNeedApproval = new java.util.HashSet<>(); // 关闭自动接收的 fp
 
     public IdentityStore(Context context, String deviceName) throws Exception {
         identityDir = new File(context.getFilesDir(), "identity");
@@ -118,6 +120,17 @@ public final class IdentityStore {
         return false;
     }
 
+    /** 已配对且允许免确认接收文件。 */
+    public synchronized boolean isFileTrusted(String fp) {
+        return fp != null && isPaired(fp) && !filesNeedApproval.contains(fp);
+    }
+
+    public synchronized void setFileTrust(String fp, boolean trusted) {
+        if (fp == null || !isPaired(fp)) return;
+        boolean changed = trusted ? filesNeedApproval.remove(fp) : filesNeedApproval.add(fp);
+        if (changed) persistPaired();
+    }
+
     public synchronized void addPaired(String fp, String name) {
         if (fp == null || fp.equals(fingerprint)) return;
         for (String[] p : paired) {
@@ -130,6 +143,7 @@ public final class IdentityStore {
     public synchronized void removePaired(String fp) {
         boolean changed = paired.removeIf(p -> p[0].equals(fp));
         lastAddr.remove(fp);
+        filesNeedApproval.remove(fp);
         if (changed) { persistPaired(); persistLastAddr(); }
     }
 
@@ -146,7 +160,10 @@ public final class IdentityStore {
                 JSONObject o = arr.getJSONObject(i);
                 String fp = o.optString("fp", "");
                 String name = o.optString("name", "?");
-                if (!fp.isEmpty() && !fp.equals(fingerprint)) paired.add(new String[]{fp, name});
+                if (!fp.isEmpty() && !fp.equals(fingerprint)) {
+                    paired.add(new String[]{fp, name});
+                    if (!o.optBoolean("trustFiles", true)) filesNeedApproval.add(fp);
+                }
             }
         } catch (Exception ignored) {}
     }
@@ -155,7 +172,9 @@ public final class IdentityStore {
         try {
             JSONArray arr = new JSONArray();
             for (String[] p : paired) {
-                arr.put(new JSONObject().put("fp", p[0]).put("name", p[1]));
+                JSONObject o = new JSONObject().put("fp", p[0]).put("name", p[1]);
+                if (filesNeedApproval.contains(p[0])) o.put("trustFiles", false);
+                arr.put(o);
             }
             writeAll(new File(identityDir, "paired.json"), arr.toString().getBytes(StandardCharsets.UTF_8));
         } catch (Exception ignored) {}

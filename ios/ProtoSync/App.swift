@@ -32,6 +32,7 @@ struct RootView: View {
                 header(P)
                 if let err = model.initError { initErrorCard(err, P) }
                 if let request = model.pairing { pairingGate(request, P) }
+                if let offer = model.fileOffers.first { fileOfferGate(offer, P) }
                 if !model.transfers.isEmpty { transferCard(P) }
                 if !model.peers.isEmpty { connectedCard(P) }
                 nearbyCard(P)
@@ -157,6 +158,47 @@ struct RootView: View {
         .overlay(RoundedRectangle(cornerRadius: 6).stroke(P.amberText.opacity(0.55), lineWidth: 1))
     }
 
+    // MARK: - 文件请求闸门(Cyan:入站数据,需要决定)
+
+    private func fileOfferGate(_ prompt: IOSAppModel.FileOfferPrompt, _ P: SP) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SignalUI.SectionHeader(zh: "文件请求", en: "INCOMING", P: P)
+                .foregroundStyle(P.cyanText)
+            Text("「\(prompt.offer.from.name)」想发送文件")
+                .font(.system(size: 14, weight: .medium)).foregroundStyle(P.text)
+            Text("\(prompt.offer.name) · \(ByteCountFormatter.string(fromByteCount: prompt.offer.size, countStyle: .file))")
+                .font(.system(size: 12)).foregroundStyle(P.textDim)
+                .lineLimit(1).truncationMode(.middle)
+            HStack(spacing: 10) {
+                Button {
+                    model.decideFileOffer(prompt, accept: true)
+                } label: {
+                    Text("接收").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(AccentButtonStyle(P: P, fill: P.cyanText))
+                Button {
+                    model.decideFileOffer(prompt, accept: false)
+                } label: {
+                    Text("拒绝").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(OutlinedButtonStyle(P: P))
+            }
+            Button {
+                model.decideFileOffer(prompt, accept: true, alwaysTrust: true)
+            } label: {
+                Text("接收,并始终信任此设备的文件")
+                    .font(.system(size: 12))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(P.cyanText)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 6).fill(P.panel))
+        .overlay(RoundedRectangle(cornerRadius: 6).stroke(P.cyanText.opacity(0.55), lineWidth: 1))
+    }
+
     // MARK: - 传输轨道(Cyan 进行 / Lime 完成;§9.4)
 
     private func transferCard(_ P: SP) -> some View {
@@ -205,6 +247,18 @@ struct RootView: View {
                     Text(String(peer.fingerprint.prefix(8)))
                         .font(.system(size: 11).monospaced())
                         .foregroundStyle(P.textDim)
+                    Menu {
+                        Toggle("自动接收文件", isOn: Binding(
+                            get: { !model.filesNeedApproval.contains(peer.fingerprint) },
+                            set: { model.setFileTrust(peer, trusted: $0) }))
+                    } label: {
+                        Image(systemName: model.filesNeedApproval.contains(peer.fingerprint)
+                              ? "tray.and.arrow.down" : "tray.and.arrow.down.fill")
+                            .font(.system(size: 13))
+                            .foregroundStyle(P.textDim)
+                            .frame(width: 28, height: 28)
+                    }
+                    .accessibilityLabel("文件接收设置")
                 }
             }
         }

@@ -11,13 +11,17 @@ struct SignalDeviceRow: Identifiable, Equatable {
     let name: String
     let fingerprint: String
     let online: Bool
+    var filesTrusted = true
 }
 
 extension AppModel {
     /// 当前已连接(在线)的全部设备
     var connectedRows: [SignalDeviceRow] {
-        onlinePeers.map { SignalDeviceRow(id: $0.fingerprint, name: $0.name,
-                                          fingerprint: $0.fingerprint, online: true) }
+        onlinePeers.map { peer in
+            SignalDeviceRow(id: peer.fingerprint, name: peer.name,
+                            fingerprint: peer.fingerprint, online: true,
+                            filesTrusted: pairedDevices.first { $0.fingerprint == peer.fingerprint }?.filesTrusted ?? true)
+        }
     }
 
     /// 已配对设备,在线优先(各自保持原有顺序;离线设备回上线时移到顶部)
@@ -25,7 +29,8 @@ extension AppModel {
         let rows = pairedDevices.map { d -> SignalDeviceRow in
             let live = onlinePeers.first { $0.fingerprint == d.fingerprint }
             return SignalDeviceRow(id: d.fingerprint, name: live?.name ?? d.name,
-                                   fingerprint: d.fingerprint, online: live != nil)
+                                   fingerprint: d.fingerprint, online: live != nil,
+                                   filesTrusted: d.filesTrusted)
         }
         return rows.filter { $0.online } + rows.filter { !$0.online }
     }
@@ -96,6 +101,11 @@ struct DashboardChrome: View {
                     .padding(.top, 10)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
+            if let offer = model.fileOffers.first {
+                SignalFileOfferGate(model: model, prompt: offer, queued: model.fileOffers.count - 1)
+                    .padding(.top, 10)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
             switch mode {
             case .overview: OverviewPane(model: model)
             case .devices:  DevicesPane(model: model)
@@ -106,6 +116,7 @@ struct DashboardChrome: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .background(P.canvas)
         .animation(.easeInOut(duration: 0.2), value: model.pairingRequest == nil)
+        .animation(.easeInOut(duration: 0.2), value: model.fileOffers.first?.id)
     }
 
     // System Header:logo + 本机身份 + 在线数 + 扫描
@@ -544,9 +555,12 @@ struct SignalDeviceNodeRow: View {
                 Text(row.name)
                     .font(.system(.body, design: .default).weight(.medium))
                     .foregroundStyle(P.text)
-                Text(signalFPText(row.fingerprint))
-                    .font(.system(size: 10).monospacedDigit())
-                    .foregroundStyle(P.textDim)
+                HStack(spacing: 4) {
+                    Text(signalFPText(row.fingerprint))
+                    if !row.filesTrusted { Text("· 文件需确认") }
+                }
+                .font(.system(size: 10).monospacedDigit())
+                .foregroundStyle(P.textDim)
             }
             Spacer()
             SignalUI.StatusTag(status: row.online ? .connected : .offline, P: P)
@@ -561,6 +575,10 @@ struct SignalDeviceNodeRow: View {
             }
             if showRemove {
                 Menu {
+                    Toggle("自动接收文件", isOn: Binding(
+                        get: { row.filesTrusted },
+                        set: { model.setFileTrust(fingerprint: row.fingerprint, trusted: $0) }))
+                    Divider()
                     Button("移除此设备", role: .destructive) {
                         model.removePaired(fingerprint: row.fingerprint)
                     }
@@ -638,6 +656,46 @@ struct SignalPairingGate: View {
         .padding(12)
         .background(P.amberText.opacity(0.10), in: RoundedRectangle(cornerRadius: 4))
         .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(P.amberText.opacity(0.45)))
+        .padding(.horizontal, 14)
+    }
+}
+
+// MARK: - 文件请求闸门(Cyan:入站数据,需要决定)
+
+struct SignalFileOfferGate: View {
+    @ObservedObject var model: AppModel
+    let prompt: AppModel.FileOfferPrompt
+    var queued = 0
+    @Environment(\.sp) private var P
+
+    var body: some View {
+        HStack(spacing: 14) {
+            Image(systemName: "tray.and.arrow.down")
+                .font(.title2)
+                .foregroundStyle(P.cyanText)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("「\(prompt.offer.from.name)」想发送文件")
+                    .font(.headline).foregroundStyle(P.text)
+                Text("\(prompt.offer.name) · \(ByteCountFormatter.string(fromByteCount: prompt.offer.size, countStyle: .file))"
+                     + (queued > 0 ? " · 另有 \(queued) 个请求" : ""))
+                    .font(.caption).foregroundStyle(P.textDim)
+                    .lineLimit(1).truncationMode(.middle)
+            }
+            Spacer()
+            Button("拒绝") { withAnimation { model.declineFileOffer(prompt) } }
+                .controlSize(.small)
+            Menu("接收") {
+                Button("仅此一次") { withAnimation { model.acceptFileOffer(prompt) } }
+                Button("始终接收此设备的文件") { withAnimation { model.acceptFileOffer(prompt, alwaysTrust: true) } }
+            } primaryAction: {
+                withAnimation { model.acceptFileOffer(prompt) }
+            }
+            .controlSize(.small)
+            .fixedSize()
+        }
+        .padding(12)
+        .background(P.cyanText.opacity(0.10), in: RoundedRectangle(cornerRadius: 4))
+        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(P.cyanText.opacity(0.45)))
         .padding(.horizontal, 14)
     }
 }

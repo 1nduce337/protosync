@@ -57,6 +57,10 @@ public final class SyncCore {
         void onTransferFinished(String id, String name, boolean ok, String error,
                                 boolean incoming, String savedPath, String savedUri);
         void onActivityChanged();
+        /** 未开启自动接收的设备发来文件请求;用 decideFileOffer(id, accept) 回复,超时自动拒绝。 */
+        void onFileOfferRequested(String id, String name, long size, String fromName, String fromFp);
+        /** 待确认的文件请求已失效(超时/对端断开),UI 收起对应提示。 */
+        void onFileOfferExpired(String id);
     }
 
     public static class ActivityItem {
@@ -301,6 +305,22 @@ public final class SyncCore {
         });
     }
 
+    public boolean isFileTrusted(String fp) {
+        return identity != null && identity.isFileTrusted(fp);
+    }
+
+    public void setFileTrust(String fp, boolean trusted) {
+        runOnEngine(() -> {
+            identity.setFileTrust(fp, trusted);
+            postEvent(() -> listener.onDiscoveredChanged());
+        });
+    }
+
+    /** UI 对文件请求的决定(任意线程);请求已超时/失效时无效。 */
+    public void decideFileOffer(String id, boolean accept) {
+        runOnEngine(() -> { if (transfers != null) transfers.resolveOffer(id, accept); });
+    }
+
     public void removePaired(String fp) {
         runOnEngine(() -> {
             identity.removePaired(fp);
@@ -447,6 +467,10 @@ public final class SyncCore {
                 default:
                     link.close("意外握手消息: " + type);
             }
+        } catch (Protocol.VersionMismatchException e) {
+            // 回 error 帧:旧版本对端能展示原因,而不是含糊的验签失败
+            postLog("握手失败 [" + link.role + "]: " + e.getMessage());
+            link.sendErrorAndClose(e.getMessage());
         } catch (Exception e) {
             postLog("握手处理异常 [" + link.role + "]: " + e);
             link.close(String.valueOf(e));
@@ -553,21 +577,30 @@ public final class SyncCore {
         try {
             switch (m.getString("type")) {
                 case Protocol.TYPE_CLIPBOARD: {
-                    String hash = m.getString("hash");
+                    String claimed = m.getString("hash");
                     boolean force = m.optBoolean("force", false);
+                    String kind = m.optString("kind", "");
+                    String data = m.getString("data");
+                    byte[] content;
+                    if ("text".equals(kind)) content = data.getBytes(StandardCharsets.UTF_8);
+                    else if ("image".equals(kind)) content = Crypto.b64decode(data);
+                    else return;
+                    // 声明的哈希必须与实际内容一致:去重与防回环都依赖它,不能信任对端自报
+                    String hash = Crypto.sha256Hex(content);
+                    if (!hash.equalsIgnoreCase(claimed)) {
+                        postLog("剪贴板哈希不符,已丢弃(来自 " + link.peerName() + ")");
+                        return;
+                    }
                     // 手动发送(force)是用户明确意图,不受 5 分钟去重限制;
                     // 自动同步的重复内容丢弃。两者都插入 seen 防回环。
                     if (!force && seenHas(hash)) return;
                     seenPut(hash);
-                    String kind = m.optString("kind", "");
                     if ("text".equals(kind)) {
-                        String text = m.getString("data");
-                        addActivity("text", true, text, "已复制到剪贴板", false);
-                        postEvent(() -> listener.onClipboardText(text));
-                    } else if ("image".equals(kind)) {
-                        byte[] png = Crypto.b64decode(m.getString("data"));
+                        addActivity("text", true, data, "已复制到剪贴板", false);
+                        postEvent(() -> listener.onClipboardText(data));
+                    } else {
                         addActivity("image", true, "图片", "已复制到剪贴板", false);
-                        postEvent(() -> listener.onClipboardImage(png));
+                        postEvent(() -> listener.onClipboardImage(content));
                     }
                     break;
                 }
@@ -707,7 +740,12 @@ public final class SyncCore {
         }
         @Override public void postEngine(Runnable r) { runOnEngine(r); }
         @Override public void postIo(Runnable r) { transfersIo.execute(r); }
+        @Override public void postEngineDelayed(Runnable r, long delayMs) {
+            Handler h = engine;
+            if (h != null) h.postDelayed(r, delayMs);
+        }
         @Override public PeerLink linkFor(String fp) { return connections.get(fp); }
+        @Override public boolean trustsFiles(String fp) { return identity.isFileTrusted(fp); }
     }
 
     private final ExecutorService transfersIo = Executors.newSingleThreadExecutor(r -> {
@@ -732,6 +770,16 @@ public final class SyncCore {
             else detail = "发送完成";
             addActivity("file", incomingDir, name, detail, !ok);
             postEvent(() -> listener.onTransferFinished(id, name, ok, error, incomingDir, savedPath, savedUri));
+        }
+        @Override public void onFileOfferRequested(String id, String name, long size, String fromName, String fromFp) {
+            addActivity("file", true, name, "等待确认(来自 " + fromName + ")", false);
+            postEvent(() -> listener.onFileOfferRequested(id, name, size, fromName, fromFp));
+        }
+        @Override public void onFileOfferExpired(String id) {
+            postEvent(() -> listener.onFileOfferExpired(id));
+        }
+        @Override public void onTransferAwaitingApproval(String id, String name) {
+            addActivity("file", false, name, "等待对方确认…", false);
         }
     }
 }

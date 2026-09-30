@@ -178,6 +178,11 @@ public final class PeerConnection {
             default:
                 throw ProtoSyncError.unexpectedMessage(message.type)
             }
+        } catch ProtoSyncError.versionMismatch(let peerVersion) {
+            // 旧版本对端能识别 error 帧并展示原因,比静默断开或含糊的验签失败更好排查
+            let error = ProtoSyncError.versionMismatch(peerVersion)
+            sendHandshakeFrame(.error(error.localizedDescription))
+            close(withError: error.localizedDescription)
         } catch {
             let head = [UInt8](frame.prefix(48))
             let preview = "hex=" + head.map { String(format: "%02x", $0) }.joined()

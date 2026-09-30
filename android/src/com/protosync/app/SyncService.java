@@ -41,6 +41,7 @@ public class SyncService extends Service {
 
     private static final int NOTIF_CLIP = 3;
     private static final int NOTIF_FILE = 4;
+    private static final int NOTIF_FILE_OFFER = 5;
 
     private volatile SyncCore core;
     private WifiManager.MulticastLock multicastLock;
@@ -58,6 +59,17 @@ public class SyncService extends Service {
         final String name, fp;
         PendingPair(String n, String f) { name = n; fp = f; }
     }
+
+    /** 待确认的文件请求:与配对一样逐个派发给 UI,UI 不在时排队并发通知。 */
+    private static class PendingOffer {
+        final String id, name, fromName, fromFp;
+        final long size;
+        PendingOffer(String id, String name, long size, String fromName, String fromFp) {
+            this.id = id; this.name = name; this.size = size; this.fromName = fromName; this.fromFp = fromFp;
+        }
+    }
+    private final ArrayDeque<PendingOffer> pendingOffers = new ArrayDeque<>();
+    private PendingOffer activeOffer;
 
     public class LocalBinder extends Binder {
         SyncService get() { return SyncService.this; }
@@ -132,6 +144,8 @@ public class SyncService extends Service {
         void onTransferFinished(String id, String name, boolean ok, String error,
                                 boolean incoming, String savedPath, String savedUri);
         void onActivityChanged();
+        void onFileOfferRequested(String id, String name, long size, String fromName, String fromFp);
+        void onFileOfferExpired(String id);
     }
 
     /** UI 可见且屏幕亮着才算「在场」;息屏时即使 Activity 未走 onStop 也按后台处理(走横幅通知)。 */
@@ -148,6 +162,7 @@ public class SyncService extends Service {
         }
         if (isReady()) d.onStateChanged();
         dispatchNextPair();
+        dispatchNextOffer();
         String text;
         byte[] image;
         synchronized (clientLock) {
@@ -184,7 +199,55 @@ public class SyncService extends Service {
                 pendingPairs.addFirst(activePair);
                 activePair = null;
             }
+            if (activeOffer != null) {
+                pendingOffers.addFirst(activeOffer);
+                activeOffer = null;
+            }
         }
+    }
+
+    /** 逐个派发文件请求弹窗;决定由 decideFileOffer(id, accept) 推进队列。 */
+    private void dispatchNextOffer() {
+        final PendingOffer o;
+        final Ui d;
+        synchronized (clientLock) {
+            if (ui == null || activeOffer != null || pendingOffers.isEmpty()) return;
+            d = ui;
+            o = pendingOffers.removeFirst();
+            activeOffer = o;
+        }
+        nm.cancel(NOTIF_FILE_OFFER);
+        d.onFileOfferRequested(o.id, o.name, o.size, o.fromName, o.fromFp);
+    }
+
+    /** UI 对文件请求作出决定(主线程)。alwaysTrust:同时对该设备开启自动接收。 */
+    public void decideFileOffer(String id, boolean accept, boolean alwaysTrust) {
+        String fromFp = null;
+        synchronized (clientLock) {
+            if (activeOffer != null && activeOffer.id.equals(id)) {
+                fromFp = activeOffer.fromFp;
+                activeOffer = null;
+            }
+        }
+        if (core != null) {
+            if (accept && alwaysTrust && fromFp != null) core.setFileTrust(fromFp, true);
+            core.decideFileOffer(id, accept);
+        }
+        dispatchNextOffer();
+    }
+
+    private void dropOffer(String id) {
+        boolean wasActive;
+        synchronized (clientLock) {
+            pendingOffers.removeIf(o -> o.id.equals(id));
+            wasActive = activeOffer != null && activeOffer.id.equals(id);
+            if (wasActive) activeOffer = null;
+            if (pendingOffers.isEmpty() && activeOffer == null) nm.cancel(NOTIF_FILE_OFFER);
+        }
+        if (wasActive) {
+            Ui d = currentUi(); if (d != null) d.onFileOfferExpired(id);
+        }
+        dispatchNextOffer();
     }
 
     /** 逐个派发配对弹窗;决定由 decidePairing(fp, accept) 推进队列。 */
@@ -273,6 +336,16 @@ public class SyncService extends Service {
         }
         @Override public void onActivityChanged() {
             Ui d = currentUi(); if (d != null) d.onActivityChanged();
+        }
+        @Override public void onFileOfferRequested(String id, String name, long size, String fromName, String fromFp) {
+            synchronized (clientLock) {
+                pendingOffers.addLast(new PendingOffer(id, name, size, fromName, fromFp));
+            }
+            dispatchNextOffer();
+            if (currentUi() == null) notifyFileOffer(name, fromName);
+        }
+        @Override public void onFileOfferExpired(String id) {
+            dropOffer(id);
         }
     };
 
@@ -399,6 +472,17 @@ public class SyncService extends Service {
         String ext = name.contains(".") ? name.substring(name.lastIndexOf('.') + 1).toLowerCase() : "";
         String mime = android.webkit.MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext);
         return mime != null ? mime : "*/*";
+    }
+
+    private void notifyFileOffer(String fileName, String fromName) {
+        Notification n = new Notification.Builder(this, CHANNEL_PAIR)
+                .setSmallIcon(android.R.drawable.stat_sys_download)
+                .setContentTitle("文件请求")
+                .setContentText(fromName + " 想发送「" + fileName + "」,点击处理")
+                .setAutoCancel(true)
+                .setContentIntent(openActivity())
+                .build();
+        nm.notify(NOTIF_FILE_OFFER, n);
     }
 
     private void notifyPairing(String name, String fp) {

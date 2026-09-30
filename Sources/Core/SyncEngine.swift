@@ -15,7 +15,23 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
         func engine(_ engine: SyncEngine, fileTransferStarted id: String, name: String, direction: Direction)
         func engine(_ engine: SyncEngine, fileProgress id: String, name: String, fraction: Double, direction: Direction)
         func engine(_ engine: SyncEngine, fileTransferFinished id: String, name: String, url: URL?, error: String?, direction: Direction)
+        /// 来自未开启“自动接收文件”设备的文件请求;reply 可在任意线程调用一次,超时后调用无效。
+        func engine(_ engine: SyncEngine, fileOfferRequested offer: FileOfferRequest, reply: @escaping (Bool) -> Void)
+        /// 待确认的文件请求已失效(超时 / 对端断开),UI 应收起对应提示。
+        func engine(_ engine: SyncEngine, fileOfferExpired id: String)
+        /// 本端发出的文件正在等待对方确认。
+        func engine(_ engine: SyncEngine, fileAwaitingApproval id: String, name: String)
     }
+
+    public struct FileOfferRequest: Identifiable {
+        public let id: String
+        public let name: String
+        public let size: Int64
+        public let from: PeerConnection.PeerInfo
+    }
+
+    /// 接收方等待用户确认文件请求的时长,超时自动拒绝。
+    public static let offerDecisionTimeout: TimeInterval = 120
 
     public enum Direction: String {
         case outgoing = "↑"
@@ -41,6 +57,7 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
     private var seen = SeenCache()
     private var outgoing: [String: OutgoingTransfer] = [:]
     private var incoming: [String: IncomingTransfer] = [:]
+    private var pendingOffers: [String: PendingOffer] = [:]   // 等待用户确认的文件请求
     public let inboxDirectory: URL
 
     /// 每个传输会话的在途分块上限,防止大文件撑爆发送缓冲。
@@ -58,6 +75,15 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
         var inFlight: Int = 0
         var doneSent = false
         var offerAttempts = 0
+        var awaitingApprovalSince: Date?
+    }
+
+    private struct PendingOffer {
+        let id: String
+        let name: String
+        let size: Int64
+        let sha256: String
+        let sourceFp: String
     }
 
     private struct IncomingTransfer {
@@ -283,6 +309,15 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
         engineQueue.asyncAfter(deadline: .now() + 6) { [weak self] in
             guard let self, var transfer = self.outgoing[id],
                   transfer.nextIndex == 0, !transfer.doneSent else { return }
+            if let since = transfer.awaitingApprovalSince {
+                // 对方已收到请求、正在等用户决定:不重发,只在确认时限(加余量)后放弃
+                if Date().timeIntervalSince(since) > Self.offerDecisionTimeout + 10 {
+                    self.finishOutgoing(id: id, error: "对方未确认文件请求")
+                } else {
+                    self.scheduleOfferWatchdog(id: id)
+                }
+                return
+            }
             guard transfer.offerAttempts < 2 else {
                 self.finishOutgoing(id: id, error: "对方未响应文件请求")
                 return
@@ -347,6 +382,11 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
         }
     }
 
+    /// 设置某台已配对设备的文件自动接收。
+    public func setFileTrust(fingerprint: String, trusted: Bool) {
+        store.setFileTrust(fingerprint: fingerprint, trusted: trusted)
+    }
+
     public func connection(_ connection: PeerConnection, didReceive message: Message) {
         engineQueue.async { [weak self] in
             guard let self else { return }
@@ -378,20 +418,28 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
         case MessageType.clipboard:
             // 手动发送(force)是用户明确意图,不受去重限制;自动同步仍按
             // seen 缓存丢弃 5 分钟内的重复内容。两种情况都要插入 seen 防回环。
+            // 声明的哈希必须与实际内容一致:去重与防回环都依赖它,不能信任对端自报。
             let forced = message.force == true
-            guard let hash = message.hash, forced || !seen.contains(hash) else { return }
-            seen.insert(hash)
+            guard let claimed = message.hash, let data = message.data else { return }
+            let content: Data
             switch message.kind {
-            case "text":
-                if let text = message.data {
-                    notifyMain { $0.engine(self, didReceiveClipboardText: text) }
-                }
+            case "text": content = Data(data.utf8)
             case "image":
-                if let b64 = message.data, let png = Data(base64Encoded: b64) {
-                    notifyMain { $0.engine(self, didReceiveClipboardImage: png) }
-                }
-            default:
-                break
+                guard let png = Data(base64Encoded: data) else { return }
+                content = png
+            default: return
+            }
+            let hash = Self.sha256Hex(content)
+            guard hash == claimed.lowercased() else {
+                PLog.info("ProtoSync: clipboard hash mismatch from \(connection.peerInfo?.fingerprint.prefix(8) ?? "?"), dropped")
+                return
+            }
+            guard forced || !seen.contains(hash) else { return }
+            seen.insert(hash)
+            if message.kind == "text" {
+                notifyMain { $0.engine(self, didReceiveClipboardText: data) }
+            } else {
+                notifyMain { $0.engine(self, didReceiveClipboardImage: content) }
             }
 
         case MessageType.fileOffer:
@@ -417,12 +465,63 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
               let name = FileTransferGuard.sanitizedFileName(message.fileName),
               let size = message.size, FileTransferGuard.isValidSize(size),
               FileTransferGuard.isValidSHA256Hex(message.sha256), let sha = message.sha256,
-              let sourceFp = connection.peerInfo?.fingerprint,
-              incoming[id] == nil, outgoing[id] == nil
+              let sourceFp = connection.peerInfo?.fingerprint
         else {
             connection.send(.fileAck(id: message.id ?? "?", accept: false, done: true))
             return
         }
+        // 发送方看门狗会重发同一 offer:同一来源的重复请求幂等回复当前状态,不重建任务
+        if let existing = incoming[id], existing.sourceFp == sourceFp {
+            if existing.expectedIndex == 0 { connection.send(.fileAck(id: id, accept: true, done: false)) }
+            return
+        }
+        if let existing = pendingOffers[id], existing.sourceFp == sourceFp {
+            connection.send(.fileAckPending(id: id))
+            return
+        }
+        guard incoming[id] == nil, outgoing[id] == nil, pendingOffers[id] == nil else {
+            connection.send(.fileAck(id: id, accept: false, done: true))
+            return
+        }
+        let offer = PendingOffer(id: id, name: name, size: size, sha256: sha, sourceFp: sourceFp)
+        if store.isFileTrusted(sourceFp) {
+            beginIncoming(offer, on: connection)
+        } else {
+            requestOfferDecision(offer, on: connection)
+        }
+    }
+
+    /// 未信任设备:先告知发送方“等待确认”,再交给 UI;超时自动拒绝。
+    private func requestOfferDecision(_ offer: PendingOffer, on connection: PeerConnection) {
+        pendingOffers[offer.id] = offer
+        connection.send(.fileAckPending(id: offer.id))
+        let request = FileOfferRequest(id: offer.id, name: offer.name, size: offer.size,
+                                       from: connection.peerInfo ?? .init(fingerprint: offer.sourceFp, name: "未知设备"))
+        let id = offer.id
+        notifyMain { delegate in
+            delegate.engine(self, fileOfferRequested: request) { [weak self] accept in
+                self?.engineQueue.async { self?.resolveOffer(id: id, accept: accept) }
+            }
+        }
+        engineQueue.asyncAfter(deadline: .now() + Self.offerDecisionTimeout) { [weak self] in
+            guard let self, self.pendingOffers[id] != nil else { return }
+            self.resolveOffer(id: id, accept: false)
+            self.notifyMain { $0.engine(self, fileOfferExpired: id) }
+        }
+    }
+
+    private func resolveOffer(id: String, accept: Bool) {
+        guard let offer = pendingOffers.removeValue(forKey: id) else { return }
+        guard let connection = connections[offer.sourceFp] else { return }
+        if accept {
+            beginIncoming(offer, on: connection)
+        } else {
+            connection.send(.fileAck(id: id, accept: false, done: true))
+        }
+    }
+
+    private func beginIncoming(_ offer: PendingOffer, on connection: PeerConnection) {
+        let (id, name, size, sha, sourceFp) = (offer.id, offer.name, offer.size, offer.sha256, offer.sourceFp)
         // 临时文件名只用本机 UUID,绝不使用远端提供的名字
         let tempURL = inboxDirectory.appendingPathComponent(".incoming-\(UUID().uuidString).part")
         do {
@@ -524,6 +623,14 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
 
     private func handleFileAck(_ message: Message) {
         guard let id = message.id, var transfer = outgoing[id] else { return }
+        if message.pending == true {
+            // 对方需要手动确认:停止重发 offer,由看门狗按确认时限兜底
+            guard transfer.awaitingApprovalSince == nil, transfer.nextIndex == 0 else { return }
+            transfer.awaitingApprovalSince = Date()
+            outgoing[id] = transfer
+            notifyMain { $0.engine(self, fileAwaitingApproval: id, name: transfer.name) }
+            return
+        }
         if message.done == true {
             // 接收方最终确认(成功或校验失败),发送侧收尾。
             finishOutgoing(id: id, error: message.accept == false ? "接收方校验失败" : nil)
@@ -534,6 +641,7 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
             return
         }
         guard message.accept == true, transfer.inFlight > 0 || transfer.nextIndex == 0 else { return }
+        transfer.awaitingApprovalSince = nil
         transfer.inFlight = 0
         outgoing[id] = transfer
         pumpChunks(id: id)
@@ -594,6 +702,12 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
 
         let incomingIDs = incoming.compactMap { $0.value.sourceFp == peerFp ? $0.key : nil }
         for id in incomingIDs { finishIncoming(id: id, error: reason) }
+
+        let offerIDs = pendingOffers.compactMap { $0.value.sourceFp == peerFp ? $0.key : nil }
+        for id in offerIDs {
+            pendingOffers.removeValue(forKey: id)
+            notifyMain { $0.engine(self, fileOfferExpired: id) }
+        }
     }
 
     // MARK: - 发现与连接
@@ -719,6 +833,14 @@ public enum FileTransferGuard {
         guard !name.isEmpty, name != ".", name != ".." else { return nil }
         return name
     }
+}
+
+/// 文件确认相关回调的默认实现:不关心的代理(如 CLI 测试对端)自动拒绝未信任设备的文件。
+public extension SyncEngine.Delegate {
+    func engine(_ engine: SyncEngine, fileOfferRequested offer: SyncEngine.FileOfferRequest,
+                reply: @escaping (Bool) -> Void) { reply(false) }
+    func engine(_ engine: SyncEngine, fileOfferExpired id: String) {}
+    func engine(_ engine: SyncEngine, fileAwaitingApproval id: String, name: String) {}
 }
 
 /// 剪贴板去重缓存:哈希 → 时间戳,过期清理,容量上限。

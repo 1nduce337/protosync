@@ -76,6 +76,10 @@ final class IOSAppModel: ObservableObject, @preconcurrency SyncEngine.Delegate {
     @Published var nearby: [String] = []       // 未配对已发现设备的短指纹
     @Published var isScanning = false
     @Published var pairing: PairingRequest?
+    /// 待确认的文件请求(来自未开启自动接收的设备),界面展示第一个
+    @Published var fileOffers: [FileOfferPrompt] = []
+    /// 已关闭“自动接收文件”的已配对设备指纹
+    @Published var filesNeedApproval: Set<String> = []
     @Published var events: [Event] = []
     @Published var receivedImage: Data?
     @Published var transfers: [TransferRow] = []
@@ -109,6 +113,12 @@ final class IOSAppModel: ObservableObject, @preconcurrency SyncEngine.Delegate {
         let reply: (Bool) -> Void
     }
 
+    struct FileOfferPrompt: Identifiable {
+        let offer: SyncEngine.FileOfferRequest
+        let reply: (Bool) -> Void
+        var id: String { offer.id }
+    }
+
     struct Event: Identifiable {
         let id = UUID()
         let line: String
@@ -140,6 +150,22 @@ final class IOSAppModel: ObservableObject, @preconcurrency SyncEngine.Delegate {
     func refresh() {
         guard ready else { return }
         peers = engine.onlinePeers()
+        let untrusted = Set(store.pairedDevices.filter { !$0.filesTrusted }.map(\.fingerprint))
+        if untrusted != filesNeedApproval { filesNeedApproval = untrusted }
+    }
+
+    func setFileTrust(_ peer: PeerConnection.PeerInfo, trusted: Bool) {
+        guard ready else { return }
+        engine.setFileTrust(fingerprint: peer.fingerprint, trusted: trusted)
+        refresh()
+        log(trusted ? "已开启自动接收:\(peer.name)" : "\(peer.name) 的文件将先询问")
+    }
+
+    func decideFileOffer(_ prompt: FileOfferPrompt, accept: Bool, alwaysTrust: Bool = false) {
+        if accept && alwaysTrust { setFileTrust(prompt.offer.from, trusted: true) }
+        prompt.reply(accept)
+        fileOffers.removeAll { $0.id == prompt.id }
+        if !accept { log("已拒绝文件:\(prompt.offer.name)") }
     }
 
     func refreshNearby() {
@@ -238,6 +264,20 @@ final class IOSAppModel: ObservableObject, @preconcurrency SyncEngine.Delegate {
         pairing = PairingRequest(info: info, reply: reply)
         log("配对请求 \(info.name)")
         #endif
+    }
+
+    func engine(_ engine: SyncEngine, fileOfferRequested offer: SyncEngine.FileOfferRequest,
+                reply: @escaping (Bool) -> Void) {
+        fileOffers.append(FileOfferPrompt(offer: offer, reply: reply))
+        log("文件请求:\(offer.from.name) → \(offer.name)")
+    }
+
+    func engine(_ engine: SyncEngine, fileOfferExpired id: String) {
+        fileOffers.removeAll { $0.id == id }
+    }
+
+    func engine(_ engine: SyncEngine, fileAwaitingApproval id: String, name: String) {
+        log("↑ 等待对方确认:\(name)")
     }
 
     func engine(_ engine: SyncEngine, didReceiveClipboardText text: String) {

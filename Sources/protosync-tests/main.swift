@@ -110,6 +110,87 @@ do {
     print("❌ 冒充测试异常: \(error)")
 }
 
+// MARK: - 握手加固(v2:版本、设备名绑定、角色标签)
+
+do {
+    let alice = try IdentityStore(directory: tempDir("v2-a"), deviceName: "Alice")
+    let bob = try IdentityStore(directory: tempDir("v2-b"), deviceName: "Bob")
+
+    // 旧版本 hello(无 v 字段)给出明确的版本错误
+    do {
+        let server = SecureChannel(identity: bob.identity, role: .responder)
+        var old = SecureChannel(identity: alice.identity, role: .initiator).makeHello()
+        old.v = nil
+        var gotVersionError = false
+        do { try server.acceptPeerHello(old) } catch ProtoSyncError.versionMismatch { gotVersionError = true }
+        check(gotVersionError, "握手:旧版本 hello 报版本不兼容")
+    }
+
+    // 中间人篡改 hello 中的设备名 → 两端 transcript 不同,验签失败
+    do {
+        let client = SecureChannel(identity: alice.identity, role: .initiator)
+        let server = SecureChannel(identity: bob.identity, role: .responder)
+        var tampered = client.makeHello()
+        tampered.name = "Mallory"
+        try server.acceptPeerHello(tampered)
+        try client.acceptPeerHello(server.makeHello())
+        checkThrows({ try server.verifyAuth(try client.makeAuth()) }, "握手:篡改设备名导致验签失败")
+    }
+
+    // 签名带角色标签:两端同一身份时(v1 下 transcript 与密钥都相同),
+    // 应答方把自己的 auth 反射回去也不能冒充发起方
+    do {
+        let client = SecureChannel(identity: alice.identity, role: .initiator)
+        let server = SecureChannel(identity: alice.identity, role: .responder)
+        try server.acceptPeerHello(client.makeHello())
+        try client.acceptPeerHello(server.makeHello())
+        let serverAuth = try server.makeAuth()
+        checkThrows({ try server.verifyAuth(serverAuth) }, "握手:反射本端 auth 被拒绝")
+        try client.verifyAuth(serverAuth)
+        check(true, "握手:角色正确的 auth 仍可验证")
+    }
+
+    do {
+        let client = SecureChannel(identity: alice.identity, role: .initiator)
+        let server = SecureChannel(identity: bob.identity, role: .responder)
+        try server.acceptPeerHello(client.makeHello())
+        try client.acceptPeerHello(server.makeHello())
+        try server.verifyAuth(try client.makeAuth())
+        try client.verifyAuth(try server.makeAuth())
+        check(true, "握手:v2 正常双向认证")
+    }
+} catch {
+    failures += 1
+    print("❌ 握手加固测试异常: \(error)")
+}
+
+// MARK: - 文件信任(按设备自动接收)
+
+do {
+    let dir = tempDir("trust")
+    let peer = String(repeating: "b", count: 64)
+    let store = try IdentityStore(directory: dir, deviceName: "T")
+    check(!store.isFileTrusted(peer), "信任:未配对设备不自动接收")
+    store.addPaired(fingerprint: peer, name: "朋友")
+    check(store.isFileTrusted(peer), "信任:新配对设备默认自动接收")
+    store.setFileTrust(fingerprint: peer, trusted: false)
+    let reloaded = try IdentityStore(directory: dir)
+    check(!reloaded.isFileTrusted(peer), "信任:关闭自动接收后持久化")
+    reloaded.addPaired(fingerprint: peer, name: "朋友改名")
+    check(!reloaded.isFileTrusted(peer), "信任:重复配对不重置设置")
+
+    // 旧版 paired.json 没有 trustFiles 字段 → 视为信任(升级后行为不变)
+    let legacyDir = tempDir("trust-legacy")
+    try """
+    [{"addedAt":"2026-01-01T00:00:00Z","fingerprint":"\(peer)","name":"旧设备"}]
+    """.write(to: legacyDir.appendingPathComponent("paired.json"), atomically: true, encoding: .utf8)
+    let legacy = try IdentityStore(directory: legacyDir, deviceName: "L")
+    check(legacy.isFileTrusted(peer), "信任:旧版配对记录默认自动接收")
+} catch {
+    failures += 1
+    print("❌ 文件信任测试异常: \(error)")
+}
+
 // MARK: - HKDF RFC 5869 向量
 
 do {

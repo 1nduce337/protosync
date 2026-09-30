@@ -52,6 +52,7 @@ public final class PeerLink {
     private Crypto.Channel channel;
     private byte[] transcript64;
     private String peerFp, peerName;
+    private String myHelloName;          // hello 里发出的设备名:transcript 必须用同一个值
     private byte[] peerSign64, peerDh64, peerEph64;
     private JSONObject pendingAuth;      // 对端 auth 先于本端配对裁决到达时缓冲
     private boolean pairingDecided = false;
@@ -141,10 +142,12 @@ public final class PeerLink {
     /** initiator 在 TCP 就绪后调用。 */
     public void sendHello() throws Exception {
         if (myEph == null) myEph = Crypto.generatePair();
+        if (myHelloName == null) myHelloName = identity.deviceName();
         Protocol.Msg m = new Protocol.Msg()
                 .put("type", Protocol.TYPE_HELLO)
+                .put("v", Protocol.VERSION)
                 .put("fp", identity.fingerprint)
-                .put("name", identity.deviceName())
+                .put("name", myHelloName)
                 .put("signPub", Crypto.b64encodeToString(identity.signPub64))
                 .put("dhPub", Crypto.b64encodeToString(identity.dhPub64))
                 .put("eph", Crypto.b64encodeToString(Crypto.rawPublic(myEph)));
@@ -154,16 +157,19 @@ public final class PeerLink {
     /** 收到对端 hello:校验指纹、派生密钥、进入配对裁决。 */
     public void acceptHello(JSONObject m) throws Exception {
         if (peerFp != null) throw new IOException("重复 hello");
+        int peerVersion = m.optInt("v", 0);
+        if (peerVersion != Protocol.VERSION) throw new Protocol.VersionMismatchException(peerVersion);
         byte[] signPub = Crypto.b64decode(m.getString("signPub"));
         byte[] dhPub = Crypto.b64decode(m.getString("dhPub"));
         byte[] eph = Crypto.b64decode(m.getString("eph"));
         String fp = m.getString("fp");
-        String name = m.optString("name", "未知设备");
+        String name = m.getString("name"); // 设备名进入 transcript,缺失即视为握手异常
         if (!Crypto.fingerprint(signPub, dhPub).equals(fp))
             throw new SecurityException("指纹与公钥不匹配");
         if (fp.equals(identity.fingerprint)) throw new SecurityException("拒绝连接自己");
 
         if (myEph == null) myEph = Crypto.generatePair();
+        if (myHelloName == null) myHelloName = identity.deviceName();
         peerFp = fp;
         peerName = name;
         peerSign64 = signPub;
@@ -174,8 +180,9 @@ public final class PeerLink {
         socket.setSoTimeout(0);
 
         java.security.spec.ECParameterSpec spec = IdentityStore.ECParameterSpecHolder.INSTANCE;
-        transcript64 = Crypto.transcript(role, identity.signPub64, identity.dhPub64,
-                Crypto.rawPublic(myEph), peerSign64, peerDh64, peerEph64);
+        transcript64 = Crypto.transcript(role,
+                identity.signPub64, identity.dhPub64, Crypto.rawPublic(myEph), myHelloName,
+                peerSign64, peerDh64, peerEph64, name);
         byte[] sessionKeys = Crypto.sessionKeys(role, identity.dhPriv, myEph.getPrivate(),
                 Crypto.publicFromRaw(peerDh64, spec), Crypto.publicFromRaw(peerEph64, spec),
                 transcript64);
@@ -202,7 +209,8 @@ public final class PeerLink {
         pairingDecidedAt = System.currentTimeMillis();
         sendHandshake(new Protocol.Msg()
                 .put("type", Protocol.TYPE_AUTH)
-                .put("sig", Crypto.b64encodeToString(Crypto.sign(identity.signPriv, transcript64))));
+                .put("sig", Crypto.b64encodeToString(
+                        Crypto.sign(identity.signPriv, Crypto.authPayload(role, transcript64)))));
         authSent = true;
         JSONObject buffered = pendingAuth;
         pendingAuth = null;
@@ -229,7 +237,9 @@ public final class PeerLink {
     private void completeAuth(JSONObject m) throws Exception {
         if (established || closed) return;
         byte[] sig = Crypto.b64decode(m.getString("sig"));
-        if (!Crypto.verify(peerSign64, transcript64, sig, IdentityStore.ECParameterSpecHolder.INSTANCE))
+        Role peerRole = role == Role.INITIATOR ? Role.RESPONDER : Role.INITIATOR;
+        if (!Crypto.verify(peerSign64, Crypto.authPayload(peerRole, transcript64), sig,
+                IdentityStore.ECParameterSpecHolder.INSTANCE))
             throw new SecurityException("签名验证失败");
         established = true;
         events.established(this);

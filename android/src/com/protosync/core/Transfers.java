@@ -34,6 +34,8 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public final class Transfers {
     public static final long MAX_FILE_SIZE = 4L * 1024 * 1024 * 1024; // 与 Swift FileTransferGuard 一致
+    /** 等待用户确认文件请求的时长,与 Swift SyncEngine.offerDecisionTimeout 一致。 */
+    public static final long OFFER_DECISION_TIMEOUT_MS = 120_000;
 
     public interface Events {
         void onTransferStarted(String id, String name, boolean incoming);
@@ -41,14 +43,20 @@ public final class Transfers {
         /** savedUri:MediaStore content URI(通知点按直接打开用);应用目录兜底路径时为 null。 */
         void onTransferFinished(String id, String name, boolean ok, String error,
                                 boolean incoming, String savedPath, String savedUri);
+        void onFileOfferRequested(String id, String name, long size, String fromName, String fromFp);
+        void onFileOfferExpired(String id);
+        void onTransferAwaitingApproval(String id, String name);
     }
 
     public interface Host {
         void sendTo(PeerLink link, Protocol.Msg m) throws Exception;
         void postEngine(Runnable r);
         void postIo(Runnable r);
+        void postEngineDelayed(Runnable r, long delayMs);
         /** 该指纹当前存活的连接(引擎连接表是并发安全的);连接被替换后自动续上。 */
         PeerLink linkFor(String fp);
+        /** 该设备是否开启了文件自动接收。 */
+        boolean trustsFiles(String fp);
     }
 
     private static class Outgoing {
@@ -57,6 +65,12 @@ public final class Transfers {
         String targetFp;
         int nextIndex = 0, inFlight = 0;
         volatile boolean doneSent = false, cancelled = false;
+        boolean awaitingApproval = false;
+    }
+
+    /** 等待用户确认的文件请求(字段已校验)。 */
+    private static class PendingOffer {
+        String id, name, sha, sourceFp; long size;
     }
 
     private static class Incoming {
@@ -72,6 +86,7 @@ public final class Transfers {
 
     private final ConcurrentHashMap<String, Outgoing> outgoing = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, Incoming> incoming = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, PendingOffer> pendingOffers = new ConcurrentHashMap<>(); // 引擎线程
 
     public Transfers(Host host, Context context, Events events) {
         this.host = host;
@@ -84,6 +99,7 @@ public final class Transfers {
         for (Incoming t : incoming.values()) { closeQuietly(t.fos); if (t.tempFile != null) t.tempFile.delete(); }
         outgoing.clear();
         incoming.clear();
+        pendingOffers.clear();
     }
 
     public boolean hasActiveForPeer(String fp) {
@@ -160,9 +176,19 @@ public final class Transfers {
         String id = m.optString("id");
         boolean accept = m.optBoolean("accept");
         boolean done = m.optBoolean("done");
+        boolean pending = m.optBoolean("pending");
         host.postIo(() -> {
             Outgoing t = outgoing.get(id);
             if (t == null || t.cancelled) return;
+            if (pending) {
+                // 对方需要手动确认:保持任务,等最终的 accept / 拒绝
+                if (!t.awaitingApproval && t.nextIndex == 0) {
+                    t.awaitingApproval = true;
+                    events.onTransferAwaitingApproval(t.id, t.name);
+                }
+                return;
+            }
+            t.awaitingApproval = false;
             if (done || !accept) {
                 boolean ok = done && accept;
                 finishOutgoing(id, t, ok, ok ? null : (done ? "接收方校验失败" : "接收方拒绝"));
@@ -231,16 +257,69 @@ public final class Transfers {
             nack(link, id);
             return;
         }
+        PendingOffer waiting = pendingOffers.get(id);
+        if (waiting != null) {
+            if (link.peerFingerprint() != null && link.peerFingerprint().equals(waiting.sourceFp)) sendPending(link, id);
+            else nack(link, id);
+            return;
+        }
         if (outgoing.containsKey(id)) { nack(link, id); return; }
+        PendingOffer offer = new PendingOffer();
+        try {
+            offer.id = id;
+            offer.name = sanitizeFileName(m.getString("fileName"));
+            offer.size = m.getLong("size");
+            if (offer.size < 0 || offer.size > MAX_FILE_SIZE) throw new IOException("文件大小无效");
+            offer.sha = m.getString("sha256");
+            if (!isValidSha256(offer.sha)) throw new IOException("文件摘要无效");
+            offer.sourceFp = link.peerFingerprint();
+            if (offer.sourceFp == null) throw new IOException("连接未认证");
+        } catch (Exception e) {
+            nack(link, id);
+            events.onTransferFinished(id, "文件", false, "无法接收: " + e.getMessage(), true, null, null);
+            return;
+        }
+        if (host.trustsFiles(offer.sourceFp)) {
+            beginIncoming(link, offer);
+            return;
+        }
+        // 未信任设备:先告知发送方「等待确认」(停止重发),再交给 UI;超时自动拒绝
+        pendingOffers.put(id, offer);
+        sendPending(link, id);
+        events.onFileOfferRequested(id, offer.name, offer.size, link.peerName(), offer.sourceFp);
+        host.postEngineDelayed(() -> {
+            if (!pendingOffers.containsKey(id)) return;
+            resolveOffer(id, false);
+            events.onFileOfferExpired(id);
+        }, OFFER_DECISION_TIMEOUT_MS);
+    }
+
+    /** 引擎线程:用户对文件请求的决定。请求已失效(超时/断开)时无操作。 */
+    public void resolveOffer(String id, boolean accept) {
+        PendingOffer offer = pendingOffers.remove(id);
+        if (offer == null) return;
+        PeerLink link = host.linkFor(offer.sourceFp);
+        if (link == null || link.isClosed()) return;
+        if (accept) beginIncoming(link, offer);
+        else nack(link, id);
+    }
+
+    private void sendPending(PeerLink link, String id) {
+        try {
+            host.sendTo(link, new Protocol.Msg().put("type", Protocol.TYPE_FILE_ACK)
+                    .put("id", id).put("done", false).put("pending", true));
+        } catch (Exception ignored) {}
+    }
+
+    private void beginIncoming(PeerLink link, PendingOffer offer) {
+        String id = offer.id;
         Incoming t = new Incoming();
         try {
             t.id = id;
-            t.name = sanitizeFileName(m.getString("fileName"));
-            t.size = m.getLong("size");
-            if (t.size < 0 || t.size > MAX_FILE_SIZE) throw new IOException("文件大小无效");
-            t.sha = m.getString("sha256");
-            if (!isValidSha256(t.sha)) throw new IOException("文件摘要无效");
-            t.sourceFp = link.peerFingerprint();
+            t.name = offer.name;
+            t.size = offer.size;
+            t.sha = offer.sha;
+            t.sourceFp = offer.sourceFp;
             File dir = incomingDir();
             t.tempFile = File.createTempFile(".incoming-", ".part", dir);
             t.fos = new FileOutputStream(t.tempFile);
@@ -248,7 +327,8 @@ public final class Transfers {
             closeQuietly(t.fos);
             if (t.tempFile != null) t.tempFile.delete();
             nack(link, id);
-            events.onTransferFinished(id, "文件", false, "无法接收: " + e.getMessage(), true, null, null);
+            events.onTransferFinished(id, t.name != null ? t.name : "文件", false,
+                    "无法接收: " + e.getMessage(), true, null, null);
             return;
         }
         incoming.put(id, t);
@@ -380,6 +460,9 @@ public final class Transfers {
                 if (t.tempFile != null) t.tempFile.delete();
                 events.onTransferFinished(t.id, t.name, false, "接收 " + t.name + " 失败: " + reason, true, null, null);
             }
+        }
+        for (PendingOffer o : pendingOffers.values()) {
+            if (fp.equals(o.sourceFp) && pendingOffers.remove(o.id) != null) events.onFileOfferExpired(o.id);
         }
     }
 

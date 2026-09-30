@@ -2,7 +2,13 @@ import Foundation
 
 // 线协议:每帧 = 4 字节大端长度 + JSON 消息体。
 // 建立加密通道之前,hello / auth 两类握手帧以明文传输;之后所有帧经 SecureChannel 加密
-// (帧体 = 12 字节随机化计数 nonce + ChaChaPoly 密文)。
+// (帧体 = 12 字节计数器 nonce(4 零字节 + 8 字节大端计数)+ ChaChaPoly 密文)。
+
+/// 线协议版本。握手 transcript 与签名格式随版本变化,版本不同的两端无法互通,
+/// 因此在 hello 里显式携带,不一致时给出明确错误而不是含糊的验签失败。
+public enum ProtocolVersion {
+    public static let current = 2
+}
 
 public enum MessageType {
     public static let hello = "hello"
@@ -20,6 +26,7 @@ public struct Message: Codable, Equatable {
     public var type: String
 
     // hello / auth
+    public var v: Int?            // hello: 协议版本(ProtocolVersion.current)
     public var fp: String?        // 对端完整指纹 (hex)
     public var name: String?      // 设备名
     public var signPub: String?   // 静态签名公钥 raw (base64)
@@ -35,6 +42,7 @@ public struct Message: Codable, Equatable {
     public var index: Int?
     public var accept: Bool?
     public var done: Bool?
+    public var pending: Bool?     // file_ack: 接收方正在等待用户确认(发送方暂停看门狗重发)
 
     // clipboard
     public var kind: String?      // "text" | "image"
@@ -47,7 +55,7 @@ public struct Message: Codable, Equatable {
     public init() { self.type = "" }
 
     public static func hello(fp: String, name: String, signPub: Data, dhPub: Data, eph: Data) -> Message {
-        Message(type: MessageType.hello, fp: fp, name: name,
+        Message(type: MessageType.hello, v: ProtocolVersion.current, fp: fp, name: name,
                 signPub: signPub.base64EncodedString(),
                 dhPub: dhPub.base64EncodedString(),
                 eph: eph.base64EncodedString())
@@ -85,18 +93,24 @@ public struct Message: Codable, Equatable {
         Message(type: MessageType.fileAck, id: id, accept: accept, done: done)
     }
 
+    /// 接收方需要用户确认:告知发送方“请求已送达,等待决定”,发送方不再重发 offer。
+    public static func fileAckPending(id: String) -> Message {
+        Message(type: MessageType.fileAck, id: id, done: false, pending: true)
+    }
+
     public static func error(_ text: String) -> Message {
         Message(type: MessageType.error, error: text)
     }
 
-    public init(type: String, fp: String? = nil, name: String? = nil,
+    public init(type: String, v: Int? = nil, fp: String? = nil, name: String? = nil,
                 signPub: String? = nil, dhPub: String? = nil, eph: String? = nil, sig: String? = nil,
                 id: String? = nil, fileName: String? = nil, size: Int64? = nil, sha256: String? = nil,
-                index: Int? = nil, accept: Bool? = nil, done: Bool? = nil,
+                index: Int? = nil, accept: Bool? = nil, done: Bool? = nil, pending: Bool? = nil,
                 kind: String? = nil, data: String? = nil, hash: String? = nil,
                 force: Bool? = nil,
                 error: String? = nil) {
         self.type = type
+        self.v = v
         self.fp = fp
         self.name = name
         self.signPub = signPub
@@ -110,6 +124,7 @@ public struct Message: Codable, Equatable {
         self.index = index
         self.accept = accept
         self.done = done
+        self.pending = pending
         self.kind = kind
         self.data = data
         self.hash = hash
@@ -180,6 +195,7 @@ public enum ProtoSyncError: LocalizedError {
     case badHandshake(String)
     case notEstablished
     case cryptoFailure(String)
+    case versionMismatch(Int?)
 
     public var errorDescription: String? {
         switch self {
@@ -190,6 +206,8 @@ public enum ProtoSyncError: LocalizedError {
         case .badHandshake(let why): return "握手失败: \(why)"
         case .notEstablished: return "加密通道尚未建立"
         case .cryptoFailure(let why): return "加密操作失败: \(why)"
+        case .versionMismatch(let peer):
+            return "协议版本不兼容(对端 v\(peer.map(String.init) ?? "1"),本机 v\(ProtocolVersion.current)),请把所有设备更新到最新版本"
         }
     }
 }

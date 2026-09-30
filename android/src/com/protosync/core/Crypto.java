@@ -31,7 +31,10 @@ import javax.crypto.spec.SecretKeySpec;
 /**
  * 加密原语,与 macOS Swift 端(SecureChannel.swift)逐字节对齐:
  * - 指纹 = hex(SHA256(signPub64 ‖ dhPub64)),公钥均为 64B X‖Y 裸编码
- * - transcript = SHA256("ProtoSync-v1" ‖ initSign ‖ initDh ‖ initEph ‖ respSign ‖ respDh ‖ respEph)
+ * - transcript = SHA256("ProtoSync-v2" ‖ initSign ‖ initDh ‖ initEph ‖ len32(initName) ‖ initName
+ *                              ‖ respSign ‖ respDh ‖ respEph ‖ len32(respName) ‖ respName)
+ *   (len32 = UTF-8 字节长度,4 字节大端)
+ * - auth 签名载荷 = "protosync-auth-initiator" / "protosync-auth-responder" ‖ transcript
  * - IKM = DH(ephI,ephR) ‖ DH(ephI,staticR) ‖ DH(staticI,ephR) 各 32B
  * - HKDF-256(salt=transcript, info="protosync-keys", 64B):前 32B=c2s、后 32B=s2c
  * - ChaCha20-Poly1305:nonce = 4 零字节 + 8B 大端计数器;密文帧 = nonce ‖ ct ‖ tag
@@ -81,21 +84,33 @@ public final class Crypto {
 
     // ================= transcript / 会话密钥 =================
 
-    public static byte[] transcript(Role role, byte[] mySign64, byte[] myDh64, byte[] myEph64,
-                                    byte[] peerSign64, byte[] peerDh64, byte[] peerEph64) {
-        byte[] initSign, initDh, initEph, respSign, respDh, respEph;
-        if (role == Role.INITIATOR) {
-            initSign = mySign64; initDh = myDh64; initEph = myEph64;
-            respSign = peerSign64; respDh = peerDh64; respEph = peerEph64;
-        } else {
-            respSign = mySign64; respDh = myDh64; respEph = myEph64;
-            initSign = peerSign64; initDh = peerDh64; initEph = peerEph64;
-        }
+    public static byte[] transcript(Role role,
+                                    byte[] mySign64, byte[] myDh64, byte[] myEph64, String myName,
+                                    byte[] peerSign64, byte[] peerDh64, byte[] peerEph64, String peerName) {
         MessageDigest md = sha256();
-        md.update("ProtoSync-v1".getBytes(StandardCharsets.UTF_8));
-        md.update(initSign); md.update(initDh); md.update(initEph);
-        md.update(respSign); md.update(respDh); md.update(respEph);
+        md.update("ProtoSync-v2".getBytes(StandardCharsets.UTF_8));
+        if (role == Role.INITIATOR) {
+            transcriptParty(md, mySign64, myDh64, myEph64, myName);
+            transcriptParty(md, peerSign64, peerDh64, peerEph64, peerName);
+        } else {
+            transcriptParty(md, peerSign64, peerDh64, peerEph64, peerName);
+            transcriptParty(md, mySign64, myDh64, myEph64, myName);
+        }
         return md.digest();
+    }
+
+    private static void transcriptParty(MessageDigest md, byte[] sign64, byte[] dh64, byte[] eph64, String name) {
+        md.update(sign64); md.update(dh64); md.update(eph64);
+        byte[] nameBytes = name.getBytes(StandardCharsets.UTF_8);
+        int n = nameBytes.length;
+        md.update(new byte[]{(byte) (n >>> 24), (byte) (n >>> 16), (byte) (n >>> 8), (byte) n});
+        md.update(nameBytes);
+    }
+
+    /** 签名载荷 = 角色标签 ‖ transcript。角色标签防止一端的 auth 被反射回它自己。 */
+    public static byte[] authPayload(Role signer, byte[] transcriptHash) {
+        String label = signer == Role.INITIATOR ? "protosync-auth-initiator" : "protosync-auth-responder";
+        return concat(label.getBytes(StandardCharsets.UTF_8), transcriptHash);
     }
 
     /** 返回 64B:前 32B c2s、后 32B s2c。 */
@@ -194,19 +209,19 @@ public final class Crypto {
 
     // ================= ECDSA(r‖s 线格式)=================
 
-    public static byte[] sign(PrivateKey signPriv, byte[] transcriptHash) throws Exception {
+    public static byte[] sign(PrivateKey signPriv, byte[] message) throws Exception {
         java.security.Signature sig = java.security.Signature.getInstance("SHA256withECDSA");
         sig.initSign(signPriv);
-        sig.update(transcriptHash);
+        sig.update(message);
         return derToRaw(sig.sign());
     }
 
-    public static boolean verify(byte[] peerSignPub64, byte[] transcriptHash,
+    public static boolean verify(byte[] peerSignPub64, byte[] message,
                                  byte[] rawSig64, ECParameterSpec spec) throws Exception {
         PublicKey pub = publicFromRaw(peerSignPub64, spec);
         java.security.Signature sig = java.security.Signature.getInstance("SHA256withECDSA");
         sig.initVerify(pub);
-        sig.update(transcriptHash);
+        sig.update(message);
         return sig.verify(rawToDer(rawSig64));
     }
 

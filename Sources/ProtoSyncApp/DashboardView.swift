@@ -15,6 +15,9 @@ struct DashboardView: View {
                     if let request = model.pairingRequest {
                         PairingBanner(model: model, request: request)
                     }
+                    if let offer = model.fileOffers.first {
+                        FileOfferBanner(model: model, prompt: offer)
+                    }
                     deviceSection
                     if !model.discoveredUnpaired.isEmpty {
                         discoveredSection
@@ -116,6 +119,9 @@ struct DashboardView: View {
                 HStack(spacing: 6) {
                     Text(DeviceIdentity.shortFingerprint(device.fingerprint))
                         .font(.caption2.monospaced())
+                    if !device.filesTrusted {
+                        Text("文件需确认")
+                    }
                     if online != nil {
                         Text("在线")
                             .font(.caption2)
@@ -137,6 +143,10 @@ struct DashboardView: View {
                 .controlSize(.small)
             }
             Menu {
+                Toggle("自动接收文件", isOn: Binding(
+                    get: { device.filesTrusted },
+                    set: { model.setFileTrust(fingerprint: device.fingerprint, trusted: $0) }))
+                Divider()
                 Button("移除此设备", role: .destructive) {
                     model.removePaired(fingerprint: device.fingerprint)
                 }
@@ -273,6 +283,37 @@ struct PairingBanner: View {
         }
         .padding(10)
         .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+struct FileOfferBanner: View {
+    @ObservedObject var model: AppModel
+    let prompt: AppModel.FileOfferPrompt
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "tray.and.arrow.down")
+                .font(.title2)
+                .foregroundStyle(Color.accentColor)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("「\(prompt.offer.from.name)」想发送文件")
+                    .font(.headline)
+                Text("\(prompt.offer.name) · \(ByteCountFormatter.string(fromByteCount: prompt.offer.size, countStyle: .file))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1).truncationMode(.middle)
+            }
+            Spacer()
+            Button("拒绝") { model.declineFileOffer(prompt) }
+                .controlSize(.small)
+            Button("始终接收") { model.acceptFileOffer(prompt, alwaysTrust: true) }
+                .controlSize(.small)
+            Button("接收") { model.acceptFileOffer(prompt) }
+                .controlSize(.small)
+                .buttonStyle(.borderedProminent)
+        }
+        .padding(10)
+        .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
     }
 }
 
