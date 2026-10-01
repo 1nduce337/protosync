@@ -62,7 +62,7 @@ New small components (`SettingsSection`, `SettingsRow`, `SettingsDivider`, `Pane
 - ✅ **Verified on the Mac (no fixes needed):** `swift build`, `swift run protosync-tests` 45/45, `./scripts/make-app.sh`. iOS not rebuilt this round (no iOS files changed by the round).
 - ⚠️ **Still to do by hand:** open 设备与设置 and look at it.
 
-### Round 5 (cloud): Android in the panel style
+### Round 5 (APK builds on the Mac; not installed or checked on a device): Android in the panel style
 
 - **Android UI rebuilt to match iOS:**
   - `MainActivity` rewritten; layout in `res/layout/activity_main.xml`;
@@ -86,10 +86,11 @@ New small components (`SettingsSection`, `SettingsRow`, `SettingsDivider`, `Pane
   - the whole Android app compiles against the Android 14 framework (Robolectric `android-all`);
   - every referenced resource exists;
   - the protocol harness (v2 handshake, version error, file-approval flow) passes 26/26 against the new build.
+- ✅ **Verified on the Mac (no fixes needed):** `./android/build_apk.sh` ran all 7 steps (aapt2 compile and link, javac, d8, zipalign, apksigner) and produced `android/build/ProtoSync-android.apk`.
 - ⚠️ **Not verified:**
-  - `aapt2` resource compile and the real APK build (no Android SDK in the cloud);
-  - how it looks on a device.
-- **Next on the Mac:** run `./android/build_apk.sh`, install with `adb install -r android/build/ProtoSync-android.apk`, and screenshot the main screen and settings sheet.
+  - `adb install`: no device was connected (`adb devices` empty);
+  - how it looks and behaves on a device.
+- **Next:** plug in the phone (USB debugging on), run `adb install -r android/build/ProtoSync-android.apk`, and check the main screen and settings sheet.
 
 ## Folder reorganisation (merged into `main`)
 
