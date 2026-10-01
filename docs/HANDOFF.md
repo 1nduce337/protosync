@@ -92,7 +92,7 @@ New small components (`SettingsSection`, `SettingsRow`, `SettingsDivider`, `Pane
   - how it looks and behaves on a device.
 - **Next:** plug in the phone (USB debugging on), run `adb install -r android/build/ProtoSync-android.apk`, and check the main screen and settings sheet.
 
-### Round 6 (cloud): pairing fixes from device testing
+### Round 6 (builds on the Mac; not installed or tested on devices): pairing fixes from device testing
 
 The user reported two bugs:
 - each side showed the *other* device's fingerprint as the "code", so the two screens never matched;
@@ -109,7 +109,11 @@ The user reported two bugs:
 - the harness passes 27/27, including both ends of a real handshake computing the same code;
 - the Java code matches an independent Python version of the Swift formula on 3 random handshakes.
 
-**Not verified:** Swift compile, and pairing on real devices.
+**Verified on the Mac (no fixes needed):** `swift build`, `swift run protosync-tests` 48/48 (3 new code tests), `./scripts/make-app.sh`, iOS simulator build (xcodegen + xcodebuild, unsigned), `./android/build_apk.sh` (all 7 steps).
+
+**Not verified:**
+- `adb install -r`: no device was connected (`adb devices` empty), so the new APK is not on the phone;
+- pairing on real devices.
 
 **Next on the Mac:**
 1. Run `swift build` and `swift run protosync-tests` (3 new code tests), `./scripts/make-app.sh`, and `./android/build_apk.sh`.
