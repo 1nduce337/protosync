@@ -3,9 +3,10 @@ import ImageIO
 import Foundation
 import UniformTypeIdentifiers
 
-// 从 logo 概念稿生成三端应用图标:
+// 从 logo 概念稿生成各端图标:
 //   iOS    Assets.xcassets/AppIcon(1024,Carbon 底 + 深色变体 logo)
 //   Android res/mipmap-* 自适应图标(前景 = 深色变体 logo / 单色层,背景 = Carbon 950 纯色)
+//   macOS  packaging/macos/AppIcon.iconset(make-app.sh 打包成 icns)+ 菜单栏模板图标 MenuBarIcon(@2x).png
 // 用法:swift make-app-icons.swift <项目根>
 
 let root = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "."
@@ -132,4 +133,70 @@ writeText("""
 </shape>
 """, to: "\(root)/android/res/drawable/ic_launcher_background.xml")
 
-print("\n三端图标生成完毕")
+// ---------- macOS ----------
+// 1) 应用图标:Big Sur 网格(1024 画布中央 824 圆角方块,四周留给阴影),Carbon 底 + 深色变体 logo。
+//    输出 iconset,make-app.sh 用 iconutil 打包成 AppIcon.icns。
+func macIcon(size: Int, logo: CGImage) -> CGImage {
+    let s = CGFloat(size)
+    let ctx = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: size * 4,
+                        space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    let inset = s * 100 / 1024
+    let body = CGRect(x: inset, y: inset, width: s - 2 * inset, height: s - 2 * inset)
+    let radius = body.width * 0.225
+    let path = CGPath(roundedRect: body, cornerWidth: radius, cornerHeight: radius, transform: nil)
+    ctx.saveGState()
+    ctx.setShadow(offset: CGSize(width: 0, height: -s * 0.012), blur: s * 0.024,
+                  color: CGColor(srgbRed: 0, green: 0, blue: 0, alpha: 0.35))
+    ctx.addPath(path)
+    ctx.setFillColor(red: CGFloat(0x11) / 255, green: CGFloat(0x14) / 255, blue: CGFloat(0x17) / 255, alpha: 1)
+    ctx.fillPath()
+    ctx.restoreGState()
+    ctx.addPath(path)
+    ctx.clip()
+    ctx.interpolationQuality = .high
+    let logoSize = body.width * 0.74   // 源图自带留白,与 iOS(画布 70%)视觉大小一致
+    ctx.draw(logo, in: CGRect(x: body.midX - logoSize / 2, y: body.midY - logoSize / 2,
+                              width: logoSize, height: logoSize))
+    return ctx.makeImage()!
+}
+
+let iconset: [(String, Int)] = [
+    ("icon_16x16", 16), ("icon_16x16@2x", 32), ("icon_32x32", 32), ("icon_32x32@2x", 64),
+    ("icon_128x128", 128), ("icon_128x128@2x", 256), ("icon_256x256", 256), ("icon_256x256@2x", 512),
+    ("icon_512x512", 512), ("icon_512x512@2x", 1024),
+]
+for (name, size) in iconset {
+    writePNG(macIcon(size: size, logo: logo), to: "\(root)/packaging/macos/AppIcon.iconset/\(name).png")
+}
+
+// 2) 菜单栏模板图标:logo 剪影(只用 alpha,系统按菜单栏深浅自动着色),裁到图形边界后
+//    等比放进 18pt 方框(@1x 18px / @2x 36px)。位图内存首行即图像顶行,与 CGImage.cropping 坐标一致。
+var minX = w, minY = h, maxX = -1, maxY = -1
+for y in 0..<h {
+    for x in 0..<w where px[(y * w + x) * 4 + 3] > 24 {
+        minX = min(minX, x); maxX = max(maxX, x)
+        minY = min(minY, y); maxY = max(maxY, y)
+    }
+}
+guard maxX >= minX, let monoCropped = monoLogo.cropping(to: CGRect(x: minX, y: minY,
+                                                                  width: maxX - minX + 1, height: maxY - minY + 1))
+else { fatalError("logo 没有不透明像素") }
+
+func templateIcon(size: Int) -> CGImage {
+    let ctx = CGContext(data: nil, width: size, height: size, bitsPerComponent: 8, bytesPerRow: size * 4,
+                        space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+    ctx.interpolationQuality = .high
+    let box = CGFloat(size) * 0.9
+    let aspect = CGFloat(monoCropped.width) / CGFloat(monoCropped.height)
+    let drawW = aspect >= 1 ? box : box * aspect
+    let drawH = aspect >= 1 ? box / aspect : box
+    ctx.draw(monoCropped, in: CGRect(x: (CGFloat(size) - drawW) / 2, y: (CGFloat(size) - drawH) / 2,
+                                     width: drawW, height: drawH))
+    return ctx.makeImage()!
+}
+writePNG(templateIcon(size: 18), to: "\(root)/Sources/ProtoSyncApp/Resources/MenuBarIcon.png")
+writePNG(templateIcon(size: 36), to: "\(root)/Sources/ProtoSyncApp/Resources/MenuBarIcon@2x.png")
+
+print("\n各端图标生成完毕(iOS / Android / macOS 应用图标与菜单栏图标)")

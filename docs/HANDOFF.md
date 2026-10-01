@@ -123,6 +123,21 @@ The user reported two bugs:
    - accepting makes both sides list each other;
    - rejecting leaves neither side paired.
 
+### Round 7 (cloud, not run yet): macOS app icon and menu-bar icon from the logo
+
+- **`scripts/make-app-icons.swift`** gains a macOS section:
+  - `packaging/macos/AppIcon.iconset`: 10 PNGs, Big Sur grid (824/1024 rounded square, Carbon fill, white + Lime logo, soft shadow);
+  - `Sources/ProtoSyncApp/Resources/MenuBarIcon.png` and `MenuBarIcon@2x.png`: a logo silhouette cropped to its bounds, 18 pt, used as a template image so macOS tints it for light or dark menu bars.
+- **`scripts/make-app.sh`** runs `iconutil` to build `Contents/Resources/AppIcon.icns`, and `Info.plist` gains `CFBundleIconFile`.
+- **`main.swift`** loads `MenuBarIcon` (1x + 2x reps, `isTemplate`) for the status item and for the reset after the ✓ flash; it falls back to the old SF Symbol if the PNGs are missing.
+- The bare SwiftPM executable (`.build/.../ProtoSyncApp`) will always show the generic Unix-executable icon; only the `.app` bundle carries an icon.
+- ⚠️ **Nothing generated or compiled yet:** CoreGraphics and `iconutil` are macOS-only.
+- **Next on the Mac:**
+  1. Run `swift scripts/make-app-icons.swift .`.
+  2. Check `git status`. The iOS and Android icons are regenerated too and should be unchanged or near-identical; don't commit them if they changed visibly.
+  3. Commit `packaging/macos/AppIcon.iconset/` and `Sources/ProtoSyncApp/Resources/MenuBarIcon*.png`.
+  4. Run `swift build` and `./scripts/make-app.sh`, then relaunch the app. If Finder still shows the old icon, run `touch ProtoSync.app` or `killall Finder` (icon cache).
+
 ## Folder reorganisation (merged into `main`)
 
 - Moved `ProtoSyncUIDemo/` and `android-compose-scaffold/` into `tools/`; moved `design/` into `docs/design/`.

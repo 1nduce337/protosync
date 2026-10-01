@@ -13,6 +13,13 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cp "$BIN/ProtoSyncApp" "$APP/Contents/MacOS/ProtoSync"
 
+# 应用图标:scripts/make-app-icons.swift 生成的 iconset → AppIcon.icns
+if [ -d packaging/macos/AppIcon.iconset ]; then
+    iconutil -c icns packaging/macos/AppIcon.iconset -o "$APP/Contents/Resources/AppIcon.icns"
+else
+    echo "⚠️ 缺少 packaging/macos/AppIcon.iconset,应用将使用默认图标(先运行 swift scripts/make-app-icons.swift .)"
+fi
+
 # SwiftPM 资源 bundle(logo 等):ProtoSync_PrototoSyncApp.bundle → Contents/Resources
 for b in "$BIN"/*_ProtoSyncApp.bundle; do
     [ -d "$b" ] && cp -R "$b" "$APP/Contents/Resources/"
@@ -26,6 +33,7 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleExecutable</key>            <string>ProtoSync</string>
     <key>CFBundleIdentifier</key>            <string>local.protosync.app</string>
     <key>CFBundleName</key>                  <string>ProtoSync</string>
+    <key>CFBundleIconFile</key>              <string>AppIcon</string>
     <key>CFBundlePackageType</key>           <string>APPL</string>
     <key>CFBundleShortVersionString</key>    <string>0.1.0</string>
     <key>CFBundleVersion</key>               <string>1</string>

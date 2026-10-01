@@ -26,6 +26,7 @@ private data** — see "Privacy" below.
 | `android/src/com/protosync/app/` | Android UI and foreground service (plain Java, no Gradle) |
 | `tools/ProtoSyncUIDemo/` | UI sandbox with mock data (SwiftPM target; build with `scripts/make-demo-app.sh`). Has its own theme copy on purpose |
 | `tools/android-compose-scaffold/` | Toolchain smoke test for a future Compose migration; not part of the real build |
+| `packaging/macos/` | Generated macOS `AppIcon.iconset` (packed into `AppIcon.icns` by `make-app.sh`) |
 | `docs/design/` | Design specs (`MENUBAR_PANEL.md` is current; Signal Foundry is legacy) and logo assets |
 
 ## Build and test
@@ -34,7 +35,8 @@ private data** — see "Privacy" below.
 # macOS (SwiftPM, Command Line Tools are enough)
 swift build
 swift run protosync-tests        # must end with all tests passing
-./scripts/make-app.sh            # builds ProtoSync.app
+./scripts/make-app.sh            # builds ProtoSync.app (uses packaging/macos/AppIcon.iconset for the icon)
+swift scripts/make-app-icons.swift .   # regenerate all app icons + the menu-bar template icon from the logo (macOS only)
 
 # iOS (xcodegen + Xcode 15+)
 cd ios && xcodegen generate && open ProtoSync.xcodeproj

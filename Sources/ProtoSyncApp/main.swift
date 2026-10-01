@@ -59,6 +59,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         UNUserNotificationCenter.current().add(request)
     }
 
+    /// 菜单栏图标:logo 剪影模板图(系统按菜单栏深浅自动着色),由 scripts/make-app-icons.swift 生成;
+    /// 资源缺失时退回系统符号。
+    private static let logoStatusImage: NSImage? = {
+        func url(_ name: String) -> URL? {
+            Bundle.module.url(forResource: name, withExtension: "png")
+                ?? Bundle.module.url(forResource: name, withExtension: "png", subdirectory: "Resources")
+        }
+        guard let url1x = url("MenuBarIcon"), let rep1x = NSImageRep(contentsOf: url1x) else { return nil }
+        let image = NSImage(size: NSSize(width: 18, height: 18))
+        rep1x.size = image.size
+        image.addRepresentation(rep1x)
+        if let url2x = url("MenuBarIcon@2x"), let rep2x = NSImageRep(contentsOf: url2x) {
+            rep2x.size = image.size
+            image.addRepresentation(rep2x)
+        }
+        image.isTemplate = true
+        image.accessibilityDescription = "ProtoSync"
+        return image
+    }()
+
+    private var defaultStatusImage: NSImage? {
+        Self.logoStatusImage ?? NSImage(systemSymbolName: "arrow.left.arrow.right.circle",
+                                        accessibilityDescription: "ProtoSync")
+    }
+
     /// 菜单栏图标短暂切换为对勾,提示同步成功。
     private func flashTick() {
         guard let button = statusItem.button else { return }
@@ -68,8 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         tickResetTimer?.invalidate()
         tickResetTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in
             guard let self, let button = self.statusItem.button else { return }
-            button.image = NSImage(systemSymbolName: "arrow.left.arrow.right.circle",
-                                   accessibilityDescription: "ProtoSync")
+            button.image = self.defaultStatusImage
             button.appearance = nil
         }
     }
@@ -132,8 +156,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.image = NSImage(systemSymbolName: "arrow.left.arrow.right.circle",
-                                           accessibilityDescription: "ProtoSync")
+        statusItem.button?.image = defaultStatusImage
         statusItem.button?.target = self
         statusItem.button?.action = #selector(statusItemClicked(_:))
         statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
