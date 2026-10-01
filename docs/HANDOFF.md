@@ -3,7 +3,7 @@
 Shared status between Claude Code sessions (local Mac and cloud). Update before ending a session.
 No private data here — see "Privacy" in `CLAUDE.md`.
 
-_Last updated: 2026-10-01 (cloud session, Round 10)_
+_Last updated: 2026-10-01 (local Mac session, Round 10)_
 
 ## In progress: menu-bar panel UI (branch `feat/menubar-popover-ui`)
 
@@ -179,7 +179,7 @@ The user reported two bugs:
   4. Create the GitHub pre-release "ProtoSync 0.0.1" with `docs/releases/v0.0.1.md` as the body and the three `dist/` files attached.
   5. If `gh` isn't set up, the user creates the release on github.com (Releases → Draft a new release) and uploads the files from `dist/`.
 
-### Round 10 (cloud; Swift unverified): macOS notifications fixed, "received" indicator in the menu bar
+### Round 10 (builds on the Mac; notifications and icon not checked by hand): macOS notifications fixed, "received" indicator in the menu bar
 
 The user reported: the "同步时发送通知" switch is on but nothing appears; and receiving a clipboard from another device shows nothing in the menu bar. **The release is on hold until this is checked.**
 - **Why notifications never showed:**
@@ -197,7 +197,8 @@ The user reported: the "同步时发送通知" switch is on but nothing appears;
   - *sent* (this Mac's copy synced): `arrow.up.circle.fill`, template (follows the menu-bar colour), 1.5 s. Replaces the old checkmark, which forced `darkAqua` and was white on a light menu bar;
   - *received* (clipboard or file from another device): `arrow.down.circle.fill` in palette colours, ink arrow on a Lime circle, visible on light and dark menu bars, 3 s; the tooltip names the sender (e.g. "已收到「X」的剪贴板").
   - `AppModel.onReceived` is the hook, called from the clipboard-received and file-saved callbacks.
-- ⚠️ **Unverified (cloud has no Swift):** `swift build`, then check by hand:
+- ✅ **Built on the Mac (no fixes needed):** `swift build`, `swift run protosync-tests` 48/48, `./scripts/make-app.sh`; the new ProtoSync.app was relaunched.
+- ⚠️ **Not checked by hand yet** (the agent can't see banners or the menu bar):
   1. with the switch on, copying on the Mac shows a banner even while the panel is open;
   2. receiving a clipboard from the phone shows a banner and the Lime ↓ icon for 3 s;
   3. if the palette colours come out reversed (Lime arrow on a dark circle), swap `[ink, lime]` in `receivedImage`;
