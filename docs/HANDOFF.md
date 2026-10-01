@@ -40,16 +40,17 @@ Design direction B was chosen (spec: `docs/design/MENUBAR_PANEL.md`).
 - ⚠️ **Still to do by hand:** check the settings window and the iOS screen (agent can't click or run the UI).
 - **Then:** Android migration to the same design.
 
-### Round 3 (cloud, not compiled yet): settings window polish from the user's screenshots
+### Round 3 (compiled on the Mac; not checked by hand): settings window polish from the user's screenshots
 
 - **Paired-device rows:** the "自动接收" caption and switch now sit as one trailing column; removal moved into a "⋯" menu per row plus a right-click menu (still confirmed).
 - **Fingerprint:** shows the short 8-character form, with "复制完整指纹"; the full value is in the hover tooltip.
 - **Address:** uses monospaced digits at body size.
 - **Section footers:** small, secondary colour, left-aligned (they rendered right-aligned at body size).
 - **iOS:** the gear button no longer picks up the Lime tint.
-- **Next on the Mac:** run `swift build`, `swift run protosync-tests` and `./scripts/make-app.sh`, rebuild iOS, then take a quick look at the settings window.
+- ✅ **Verified on the Mac (no fixes needed):** `swift build`, `swift run protosync-tests` 45/45, `./scripts/make-app.sh`, `xcodegen generate` + iOS simulator build (unsigned).
+- ⚠️ **Still to do by hand:** take a quick look at the settings window.
 
- (merged into `main`)
+## Folder reorganisation (merged into `main`)
 
 - Moved `ProtoSyncUIDemo/` and `android-compose-scaffold/` into `tools/`; moved `design/` into `docs/design/`.
 - Updated every reference: `Package.swift`, `.gitignore`, both icon/logo scripts, README, CLAUDE.md, design doc, scaffold README.
