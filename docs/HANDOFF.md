@@ -24,7 +24,7 @@ Design direction B was chosen (spec: `docs/design/MENUBAR_PANEL.md`).
   5. pairing and file-request cards show up in the panel.
 - ✅ The user checked the panel by hand; it renders as designed.
 
-### Round 2 (cloud, not compiled yet)
+### Round 2 (compiled on the Mac; not checked by hand)
 
 - **Panel polish:**
   - Android devices get a modern phone icon (`smartphone`, falls back to `iphone` before macOS 14) instead of the keypad phone;
@@ -36,10 +36,8 @@ Design direction B was chosen (spec: `docs/design/MENUBAR_PANEL.md`).
 - **Background reading:** the settings window flips it through `@AppStorage`; `AppDelegate` now watches `UserDefaults` and `updateNapActivity()` became idempotent.
 - **iOS redesigned** (`ios/ProtoSync/App.swift`, model additions in `Model.swift`): see the spec.
   - "发送剪贴板" now also sends images.
-- **Next on the Mac:**
-  1. Run `swift build`, `swift run protosync-tests` and `./scripts/make-app.sh`.
-  2. Regenerate the iOS project (`cd ios && xcodegen generate`, because a file was added) and build it.
-  3. Check the settings window and the iOS screen by hand.
+- ✅ **Verified on the Mac (no fixes needed):** `swift build`, `swift run protosync-tests` 45/45, `./scripts/make-app.sh`, `xcodegen generate` + iOS simulator build (unsigned).
+- ⚠️ **Still to do by hand:** check the settings window and the iOS screen (agent can't click or run the UI).
 - **Then:** Android migration to the same design.
 
 ## Folder reorganisation (merged into `main`)
