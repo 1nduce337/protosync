@@ -166,6 +166,19 @@ The user reported two bugs:
   4. Tag `v0.0.1` and push the tag.
   5. Create the GitHub release "ProtoSync 0.0.1" from that tag, with `docs/releases/v0.0.1.md` as the body, attaching `dist/ProtoSync-0.0.1-macOS.zip`, `dist/ProtoSync-0.0.1-android.apk` and `dist/ProtoSync-0.0.1-SHA256.txt`. Mark it as a pre-release.
 
+### Round 9 (cloud): README screenshots, plus an Android spinner fix
+
+- **The four README screenshots are in `docs/img/`:** `macos-panel.png`, `macos-settings.png`, `android-main.png`, `pairing.png` (a Mac + Android side-by-side with the same pairing code).
+  - The user okayed the temporary device name and the home LAN IP shown in them.
+  - Device fingerprints were blurred in the Mac settings screenshots (header, paired row, nearby row).
+- **Android fix:** the spinner on the "正在与「X」配对" card rendered as a dot (default large style squeezed to 18 dp). It now uses `progressBarStyleSmall`. Compiles in the cloud.
+- **Next on the Mac (the release):**
+  1. Merge `feat/menubar-popover-ui` into `main`.
+  2. On `main`, run `scripts/package-release.sh 0.0.1`.
+  3. Tag `v0.0.1` and push the tag.
+  4. Create the GitHub pre-release "ProtoSync 0.0.1" with `docs/releases/v0.0.1.md` as the body and the three `dist/` files attached.
+  5. If `gh` isn't set up, the user creates the release on github.com (Releases → Draft a new release) and uploads the files from `dist/`.
+
 ## Folder reorganisation (merged into `main`)
 
 - Moved `ProtoSyncUIDemo/` and `android-compose-scaffold/` into `tools/`; moved `design/` into `docs/design/`.

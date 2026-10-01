@@ -123,3 +123,6 @@ Swift (`Sources/Core`) and Java (`android/src/com/protosync/core`) implement the
 - API keys, keystores or provisioning profiles
 
 Use placeholders (`<UDID>`, `<TEAM_ID>`, `192.168.x.x`) in docs.
+
+- **Screenshots and pasted content:** check them for anything on the list above before committing. Device fingerprints are easy to miss: they appear in the settings window header and in paired/nearby rows. Blur them.
+- **Always remind the user** when something privacy-related comes up, even when it looks harmless; they asked for this. The user decides what is acceptable: for example, their home LAN IP was explicitly okayed for the README screenshots.

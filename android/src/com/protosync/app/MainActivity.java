@@ -525,7 +525,9 @@ public class MainActivity extends Activity implements SyncService.Ui {
         LinearLayout title = new LinearLayout(this);
         title.setOrientation(LinearLayout.HORIZONTAL);
         title.setGravity(Gravity.CENTER_VERTICAL);
-        android.widget.ProgressBar spinner = new android.widget.ProgressBar(this);
+        // 小号样式:默认(大号)样式缩到 18dp 只剩一个点
+        android.widget.ProgressBar spinner = new android.widget.ProgressBar(this, null,
+                android.R.attr.progressBarStyleSmall);
         spinner.setIndeterminateTintList(ColorStateList.valueOf(TEXT_SECONDARY));
         title.addView(spinner, new LinearLayout.LayoutParams(PanelUi.dp(this, 18), PanelUi.dp(this, 18)));
         TextView text = PanelUi.bold(this, "正在与「" + name + "」配对", 15, TEXT);
