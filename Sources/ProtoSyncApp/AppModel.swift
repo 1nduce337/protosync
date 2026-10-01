@@ -251,7 +251,7 @@ final class AppModel: ObservableObject, SyncEngine.Delegate {
         if let error {
             activities[idx].failed = true
             activities[idx].detail = "失败:\(error)"
-        } else if let url {
+        } else if url != nil {
             activities[idx].detail = "已保存到收件箱"
         } else {
             activities[idx].detail = "发送完成"
