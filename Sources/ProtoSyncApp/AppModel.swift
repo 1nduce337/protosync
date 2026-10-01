@@ -18,6 +18,29 @@ final class AppModel: ObservableObject, SyncEngine.Delegate {
     /// 待确认的文件请求(来自未开启自动接收的设备),按到达顺序,界面展示第一个
     @Published var fileOffers: [FileOfferPrompt] = []
     @Published var deviceName: String = ""
+    /// 剪贴板历史:只在内存里,不落盘;密码管理器标记的内容在监听层就被跳过,不会进来
+    @Published var clipHistory: [ClipItem] = []
+    /// 同步本机剪贴板到其他设备。关闭后仍接收其他设备发来的剪贴板。
+    @Published var clipboardSyncEnabled: Bool =
+        UserDefaults.standard.object(forKey: "clipboardSyncEnabled") as? Bool ?? true {
+        didSet { UserDefaults.standard.set(clipboardSyncEnabled, forKey: "clipboardSyncEnabled") }
+    }
+
+    struct ClipItem: Identifiable {
+        enum Content {
+            case text(String)
+            case image(Data)
+        }
+        let id = UUID()
+        let content: Content
+        let source: String      // 来源设备名;本机复制为 ClipItem.localSource
+        let time: Date
+
+        static let localSource = "这台 Mac"
+    }
+
+    /// 菜单栏面板展示的条数,也是内存里保留的上限
+    static let clipHistoryLimit = 6
     @Published var isRefreshing = false
 
     struct PairingRequest: Identifiable {
@@ -141,6 +164,25 @@ final class AppModel: ObservableObject, SyncEngine.Delegate {
         refresh()
     }
 
+    func recordClip(_ content: ClipItem.Content, source: String) {
+        clipHistory.insert(ClipItem(content: content, source: source, time: Date()), at: 0)
+        if clipHistory.count > Self.clipHistoryLimit {
+            clipHistory.removeLast(clipHistory.count - Self.clipHistoryLimit)
+        }
+    }
+
+    /// 写回系统剪贴板。若内容已超出 5 分钟去重窗口,剪贴板监听会照常把它再同步一次(与手动复制一致)。
+    func copyFromHistory(_ item: ClipItem) {
+        switch item.content {
+        case .text(let text): ClipboardMonitor.write(text: text)
+        case .image(let png): ClipboardMonitor.write(png: png)
+        }
+    }
+
+    func clearClipHistory() {
+        clipHistory.removeAll()
+    }
+
     func revealInbox() {
         NSWorkspace.shared.open(engine.inboxDirectory)
     }
@@ -180,7 +222,7 @@ final class AppModel: ObservableObject, SyncEngine.Delegate {
         if NSApp.mainWindow == nil {
             let content = UNMutableNotificationContent()
             content.title = "ProtoSync 配对请求"
-            content.body = "设备「\(info.name)」请求配对,打开主窗口处理"
+            content.body = "设备「\(info.name)」请求配对,点菜单栏图标处理"
             let request = UNNotificationRequest(identifier: "pairing-request", content: content, trigger: nil)
             UNUserNotificationCenter.current().add(request)
         }
@@ -193,7 +235,7 @@ final class AppModel: ObservableObject, SyncEngine.Delegate {
         if NSApp.mainWindow == nil {
             let content = UNMutableNotificationContent()
             content.title = "ProtoSync 文件请求"
-            content.body = "「\(offer.from.name)」想发送「\(offer.name)」,打开主窗口处理"
+            content.body = "「\(offer.from.name)」想发送「\(offer.name)」,点菜单栏图标处理"
             let request = UNNotificationRequest(identifier: "file-offer-\(offer.id)", content: content, trigger: nil)
             UNUserNotificationCenter.current().add(request)
         }
@@ -210,15 +252,17 @@ final class AppModel: ObservableObject, SyncEngine.Delegate {
         activities[idx].detail = "等待对方确认…"
     }
 
-    func engine(_ engine: SyncEngine, didReceiveClipboardText text: String) {
+    func engine(_ engine: SyncEngine, didReceiveClipboardText text: String, from peer: PeerConnection.PeerInfo) {
         ClipboardMonitor.write(text: text)
+        recordClip(.text(text), source: peer.name)
         appendActivity({ $0.detail = "文本 · \(text.count) 字" }, base: ActivityEntry(
             id: UUID(), kind: .text, direction: .incoming,
             title: String(text.prefix(60)), detail: "已复制到剪贴板", time: Date(), progress: nil, failed: false))
     }
 
-    func engine(_ engine: SyncEngine, didReceiveClipboardImage png: Data) {
+    func engine(_ engine: SyncEngine, didReceiveClipboardImage png: Data, from peer: PeerConnection.PeerInfo) {
         ClipboardMonitor.write(png: png)
+        recordClip(.image(png), source: peer.name)
         appendActivity({ $0.detail = "图片 · \(png.count / 1024) KB" }, base: ActivityEntry(
             id: UUID(), kind: .image, direction: .incoming,
             title: "图片", detail: "已复制到剪贴板", time: Date(), progress: nil, failed: false))

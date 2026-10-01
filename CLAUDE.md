@@ -25,7 +25,7 @@ private data** — see "Privacy" below.
 | `android/src/com/protosync/app/` | Android UI and foreground service (plain Java, no Gradle) |
 | `tools/ProtoSyncUIDemo/` | UI sandbox with mock data (SwiftPM target; build with `scripts/make-demo-app.sh`). Has its own theme copy on purpose |
 | `tools/android-compose-scaffold/` | Toolchain smoke test for a future Compose migration; not part of the real build |
-| `docs/design/` | Signal Foundry design spec and logo assets |
+| `docs/design/` | Design specs (`MENUBAR_PANEL.md` is current; Signal Foundry is legacy) and logo assets |
 
 ## Build and test
 
@@ -85,7 +85,7 @@ Swift (`Sources/Core`) and Java (`android/src/com/protosync/core`) implement the
 ## Conventions
 
 - Code comments and UI strings are in Chinese. Match the surrounding style and comment density.
-- UI follows the Signal Foundry design (`docs/design/PROTO_SYNC_VISUAL_DIRECTION.md`):
+- New UI follows the menu-bar panel design (`docs/design/MENUBAR_PANEL.md`): one Lime accent, fills instead of outlines, system font, Chinese-only copy. Screens not yet migrated still use Signal Foundry (`docs/design/PROTO_SYNC_VISUAL_DIRECTION.md`):
   - Amber = security decision
   - Cyan = incoming data
   - Lime = success

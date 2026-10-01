@@ -4,13 +4,17 @@ import UserNotifications
 import Darwin
 import Core
 
-// ProtoSync 菜单栏 + 主窗口(LSUIElement,无 Dock 图标)。
+// ProtoSync 菜单栏应用(LSUIElement,无 Dock 图标)。
+// 左键菜单栏图标:弹出面板(日常操作,MenuBarPanel);右键:传统菜单;
+// 主窗口降级为“设备与设置”,不再随启动弹出。
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var model: AppModel!
     var window: NSWindow!
     private let monitor = ClipboardMonitor()
     private var statusItem: NSStatusItem!
+    private var popover: NSPopover!
+    private let contextMenu = NSMenu()
     private var lockFD: Int32 = -1
 
     // MARK: - 剪贴板读取与同步反馈设置
@@ -36,8 +40,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             options: [.userInitiated], reason: "ProtoSync clipboard monitoring")
     }
 
-    /// 主窗口可见才允许读取(仅当全局读取关闭时参与判断)。
-    private var windowVisible: Bool { window?.isVisible == true }
+    /// 主窗口或弹出面板可见才允许读取(仅当全局读取关闭时参与判断)。
+    private var windowVisible: Bool { window?.isVisible == true || popover?.isShown == true }
 
     // MARK: - 同步成功反馈
 
@@ -104,7 +108,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         setupStatusItem()
         setupClipboardMonitor()
         updateNapActivity()
-        showMainWindow()
 
         if Bundle.main.bundleIdentifier != nil {
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { _, _ in }
@@ -125,9 +128,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = NSImage(systemSymbolName: "arrow.left.arrow.right.circle",
                                            accessibilityDescription: "ProtoSync")
-        let menu = NSMenu()
-        menu.delegate = self
-        statusItem.menu = menu
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(statusItemClicked(_:))
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        contextMenu.delegate = self
+
+        let panel = MenuBarPanel(
+            model: model,
+            openSettings: { [weak self] in
+                self?.popover.performClose(nil)
+                self?.showMainWindow()
+            },
+            quit: { NSApp.terminate(nil) })
+        let hosting = NSHostingController(rootView: panel)
+        hosting.sizingOptions = .preferredContentSize   // 面板高度随内容(请求卡片、传输)变化
+        popover = NSPopover()
+        popover.behavior = .transient
+        popover.animates = true
+        popover.appearance = NSAppearance(named: .darkAqua)
+        popover.contentViewController = hosting
+    }
+
+    /// 左键开关弹出面板;右键临时挂上传统菜单并弹出,用完摘掉(否则左键也会出菜单)。
+    @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
+        if NSApp.currentEvent?.type == .rightMouseUp {
+            popover.performClose(nil)
+            statusItem.menu = contextMenu
+            sender.performClick(nil)
+            statusItem.menu = nil
+            return
+        }
+        if popover.isShown {
+            popover.performClose(nil)
+        } else {
+            model.refresh()
+            popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .minY)
+            NSApp.activate(ignoringOtherApps: true)
+            popover.contentViewController?.view.window?.makeKey()
+        }
     }
 
     private func setupClipboardMonitor() {
@@ -135,14 +173,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             guard let self, let engine = self.model?.engine else { return }
             // 全局读取关闭时:主窗口不可见就不同步(changeCount 仍被消费,避免重新开启时倾倒旧内容)
             if !self.backgroundReading && !self.windowVisible { return }
+            // 面板里的“同步剪贴板”开关:关闭时本机复制不外发(接收不受影响)
+            guard self.model.clipboardSyncEnabled else { return }
             let peers = engine.onlinePeers().count
             switch content {
             case .text(let text):
+                // seen 命中 = 刚从其他设备收到并写入的内容,已在历史里,不重复记录
                 guard !engine.seenContains(SyncEngine.sha256Hex(Data(text.utf8))) else { return }
                 engine.broadcastClipboardText(text)
+                self.model.recordClip(.text(text), source: AppModel.ClipItem.localSource)
             case .image(let png):
                 guard !engine.seenContains(SyncEngine.sha256Hex(png)) else { return }
                 engine.broadcastClipboardImage(png: png)
+                self.model.recordClip(.image(png), source: AppModel.ClipItem.localSource)
             case .none:
                 return
             }
@@ -156,7 +199,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 680),
                               styleMask: [.titled, .closable, .resizable, .miniaturizable],
                               backing: .buffered, defer: false)
-            window.title = "ProtoSync"
+            window.title = "ProtoSync · 设备与设置"
             window.contentView = NSHostingView(rootView: makeRootView())
             window.center()
             window.isReleasedWhenClosed = false
@@ -199,7 +242,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let online = model?.onlinePeers ?? []
         menu.addItem(withTitle: "\(online.count) 台设备在线", action: nil, keyEquivalent: "")
         menu.addItem(.separator())
-        menu.addItem(withTitle: "打开主窗口", action: #selector(showWindow), keyEquivalent: "n")
+        menu.addItem(withTitle: "设备与设置…", action: #selector(showWindow), keyEquivalent: ",")
         menu.addItem(withTitle: legacyUI ? "切换到新版界面" : "切换到旧版界面",
                      action: #selector(toggleUI), keyEquivalent: "")
         let bgItem = menu.addItem(withTitle: "后台读取剪贴板(全局)",

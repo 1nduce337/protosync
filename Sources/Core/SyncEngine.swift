@@ -10,8 +10,8 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
         func engine(_ engine: SyncEngine, peerDisconnected info: PeerConnection.PeerInfo, error: String?)
         func engine(_ engine: SyncEngine, pairingRequested info: PeerConnection.PeerInfo,
                     reply: @escaping (Bool) -> Void)
-        func engine(_ engine: SyncEngine, didReceiveClipboardText text: String)
-        func engine(_ engine: SyncEngine, didReceiveClipboardImage png: Data)
+        func engine(_ engine: SyncEngine, didReceiveClipboardText text: String, from peer: PeerConnection.PeerInfo)
+        func engine(_ engine: SyncEngine, didReceiveClipboardImage png: Data, from peer: PeerConnection.PeerInfo)
         func engine(_ engine: SyncEngine, fileTransferStarted id: String, name: String, direction: Direction)
         func engine(_ engine: SyncEngine, fileProgress id: String, name: String, fraction: Double, direction: Direction)
         func engine(_ engine: SyncEngine, fileTransferFinished id: String, name: String, url: URL?, error: String?, direction: Direction)
@@ -436,10 +436,11 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
             }
             guard forced || !seen.contains(hash) else { return }
             seen.insert(hash)
+            let peer = connection.peerInfo ?? .init(fingerprint: "", name: "未知设备")
             if message.kind == "text" {
-                notifyMain { $0.engine(self, didReceiveClipboardText: data) }
+                notifyMain { $0.engine(self, didReceiveClipboardText: data, from: peer) }
             } else {
-                notifyMain { $0.engine(self, didReceiveClipboardImage: content) }
+                notifyMain { $0.engine(self, didReceiveClipboardImage: content, from: peer) }
             }
 
         case MessageType.fileOffer:

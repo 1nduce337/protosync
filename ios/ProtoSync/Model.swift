@@ -280,12 +280,12 @@ final class IOSAppModel: ObservableObject, @preconcurrency SyncEngine.Delegate {
         log("↑ 等待对方确认:\(name)")
     }
 
-    func engine(_ engine: SyncEngine, didReceiveClipboardText text: String) {
+    func engine(_ engine: SyncEngine, didReceiveClipboardText text: String, from peer: PeerConnection.PeerInfo) {
         UIPasteboard.general.string = text
         log("↓ 收到文本(\(text.count) 字)已进剪贴板")
     }
 
-    func engine(_ engine: SyncEngine, didReceiveClipboardImage png: Data) {
+    func engine(_ engine: SyncEngine, didReceiveClipboardImage png: Data, from peer: PeerConnection.PeerInfo) {
         UIPasteboard.general.image = UIImage(data: png)
         receivedImage = png
         log("↓ 收到图片(\(png.count / 1024) KB)已进剪贴板")

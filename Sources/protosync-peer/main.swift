@@ -91,13 +91,13 @@ final class Delegate: SyncEngine.Delegate {
         }
     }
 
-    func engine(_ engine: SyncEngine, didReceiveClipboardText text: String) {
+    func engine(_ engine: SyncEngine, didReceiveClipboardText text: String, from peer: PeerConnection.PeerInfo) {
         log("📋 收到文本 (\(text.count) 字): \(text.prefix(120))")
         guard watchClipboard else { return }
         ClipboardMonitor.write(text: text)
     }
 
-    func engine(_ engine: SyncEngine, didReceiveClipboardImage png: Data) {
+    func engine(_ engine: SyncEngine, didReceiveClipboardImage png: Data, from peer: PeerConnection.PeerInfo) {
         log("🖼  收到图片 (\(png.count) 字节),已写入剪贴板")
         ClipboardMonitor.write(png: png)
     }

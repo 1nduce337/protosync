@@ -3,7 +3,23 @@
 Shared status between Claude Code sessions (local Mac and cloud). Update before ending a session.
 No private data here — see "Privacy" in `CLAUDE.md`.
 
-_Last updated: 2026-10-01 (local Mac session)_
+_Last updated: 2026-10-01 (cloud session)_
+
+## In progress: menu-bar panel UI (branch `feat/menubar-popover-ui`)
+
+Design direction B was chosen (spec: `docs/design/MENUBAR_PANEL.md`).
+- **Done (macOS):**
+  - left-clicking the menu-bar icon opens a new dark panel (`Sources/ProtoSyncApp/MenuBarPanel.swift`) with device avatars (drag files onto them), pairing, file requests, transfers and the last 6 clipboard items;
+  - right-clicking keeps the classic menu;
+  - the main window is now "设备与设置" and no longer opens at launch;
+  - new "同步剪贴板" switch (pauses sending; persisted in `UserDefaults` key `clipboardSyncEnabled`);
+  - clipboard history is in memory only.
+- **Engine API change:** `didReceiveClipboardText/Image` now pass `from peer: PeerConnection.PeerInfo`. The Mac app, iOS app and CLI peer are updated.
+- ⚠️ **Not compiled yet** (written in the cloud). Next on the Mac:
+  1. Run `swift build` and `swift run protosync-tests`, and fix any errors.
+  2. Run `./scripts/make-app.sh` and check the panel by hand: drag a file onto an avatar, click a history item to re-copy, check the pairing/file-request cards, right-click menu and the switch.
+  3. Build the iOS app (only a signature change there).
+- **Next after that:** restyle the 设备与设置 window, then the iOS screen (B-iPhone mockup), then Android.
 
 ## Folder reorganisation (merged into `main`)
 
@@ -38,7 +54,7 @@ _Last updated: 2026-10-01 (local Mac session)_
 
 - ✅ **Android:** the whole app compiles against Android 14 framework classes. A JVM harness passed 25/25, covering a real v2 handshake over loopback, the version-mismatch error and the whole file-approval flow.
 - ✅ **Swift/Java wire match:** the Java transcript and signatures match an independent reimplementation of the Swift layout.
-- ⚠️ **Swift (macOS + iOS) has not been compiled or run yet.** The cloud has no Swift toolchain.
+- ✅ **Swift (macOS + iOS):** compiled and tested on the Mac after merge (45/45, see above).
 
 ## Next steps (local Mac session)
 
