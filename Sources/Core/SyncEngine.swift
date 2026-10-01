@@ -25,6 +25,8 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
         func engine(_ engine: SyncEngine, pairingAwaitingPeer info: PeerConnection.PeerInfo)
         /// 本端主动发起的配对没有完成(对方拒绝 / 超时 / 断开)。
         func engine(_ engine: SyncEngine, pairingFailed info: PeerConnection.PeerInfo, error: String)
+        /// 对方移除了与本机的配对(本机已同步移除并断开)。
+        func engine(_ engine: SyncEngine, peerUnpaired info: PeerConnection.PeerInfo)
     }
 
     public struct FileOfferRequest: Identifiable {
@@ -68,6 +70,8 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
     /// 因配对意图自动同意、尚未建立连接的对端指纹:连接建立后才写入配对列表,
     /// 对方拒绝就不留下“单方面已配对”的记录。
     private var autoGrantedPairings: Set<String> = []
+    /// 对方以为仍与本机配对、本机已移除:握手完成后只回一条 unpair 就断开,不登记连接、不记录配对
+    private var unpairOnEstablish: Set<String> = []
     public let inboxDirectory: URL
 
     /// 每个传输会话的在途分块上限,防止大文件撑爆发送缓冲。
@@ -357,6 +361,11 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
                 return
             }
             self.pending.removeAll { $0 === connection }
+            if self.unpairOnEstablish.remove(peer.fingerprint) != nil {
+                PLog.info("ProtoSync: \(peer.fingerprint.prefix(8)) 已不在配对列表,通知对方移除")
+                connection.sendThenShutdown(.unpair())
+                return
+            }
             // 本端主动发起、对方已接受:双方都确认了,此时才持久化配对
             if self.autoGrantedPairings.remove(peer.fingerprint) != nil {
                 self.store.addPaired(fingerprint: peer.fingerprint, name: peer.name)
@@ -385,14 +394,17 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
         // Runs on engineQueue. Persist trust only after PeerConnection confirms
         // the request is still live, so accepting a stale UI banner cannot pair.
         // 本端主动发起的配对例外:等连接建立(对方也接受)后再持久化。
-        guard !autoGrantedPairings.contains(peer.fingerprint) else { return }
+        guard !autoGrantedPairings.contains(peer.fingerprint),
+              !unpairOnEstablish.contains(peer.fingerprint) else { return }
         store.addPaired(fingerprint: peer.fingerprint, name: peer.name)
     }
 
+    /// 移除配对。对方在线时先通过加密通道发 unpair,让它也移除;
+    /// 不在线时,它下次以“已配对”身份重连会收到 unpair(见 pairingPolicy)。
     public func removePairedDevice(fingerprint: String) {
         engineQueue.sync {
             store.removePaired(fingerprint: fingerprint)
-            connections[fingerprint]?.shutdown()
+            connections[fingerprint]?.sendThenShutdown(.unpair())
             for connection in pending where connection.peerInfo?.fingerprint == fingerprint {
                 connection.shutdown()
             }
@@ -421,6 +433,10 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
         engineQueue.async { [weak self] in
             guard let self else { return }
             self.pending.removeAll { $0 === connection }
+            if let info = connection.peerInfo,
+               !self.pending.contains(where: { $0.peerInfo?.fingerprint == info.fingerprint }) {
+                self.unpairOnEstablish.remove(info.fingerprint)
+            }
             // 本端主动发起的配对没走到建立:告诉 UI,不留配对记录
             if let info = connection.peerInfo, self.autoGrantedPairings.contains(info.fingerprint),
                self.connections[info.fingerprint] == nil,
@@ -440,6 +456,8 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
     // MARK: - 消息分发
 
     private func handleMessage(_ message: Message, from connection: PeerConnection) {
+        // 只处理已登记的连接(被替换的重复连接、只为回 unpair 而建立的连接都不算)
+        guard let fp = connection.peerInfo?.fingerprint, connections[fp] === connection else { return }
         switch message.type {
         case MessageType.clipboard:
             // 手动发送(force)是用户明确意图,不受去重限制;自动同步仍按
@@ -479,6 +497,13 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
             handleFileAck(message)
         case MessageType.ping:
             break // 判活只看 lastInboundAt,无需回复
+        case MessageType.unpair:
+            // 来自已认证的加密通道:对方移除了配对,本机同步移除,不再自动重连
+            guard let info = connection.peerInfo else { return }
+            PLog.info("ProtoSync: \(info.fingerprint.prefix(8)) 移除了配对")
+            store.removePaired(fingerprint: info.fingerprint)
+            connection.shutdown()
+            notifyMain { $0.engine(self, peerUnpaired: info) }
         default:
             break
         }
@@ -757,20 +782,20 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
             connectAttempts[service.shortFp] = Date()
             // 已配对设备自动重连;未配对默认等用户在 UI 里主动发起
             // (CLI 测试对端可开 autoConnectUnpaired 跳过手动步骤)。
-            if store.pairedDevices.contains(where: { $0.fingerprint.hasPrefix(service.shortFp) })
-                || autoConnectUnpaired {
-                openConnection(to: service.endpoint, role: .initiator)
+            let paired = store.pairedDevices.contains(where: { $0.fingerprint.hasPrefix(service.shortFp) })
+            if paired || autoConnectUnpaired {
+                openConnection(to: service.endpoint, role: .initiator, reconnect: paired)
             }
         }
         connectAttempts = connectAttempts.filter { $0.value.timeIntervalSinceNow > -30 }
     }
 
-    private func openConnection(to endpoint: NWEndpoint, role: SecureChannel.Role) {
+    private func openConnection(to endpoint: NWEndpoint, role: SecureChannel.Role, reconnect: Bool = false) {
         PLog.info("ProtoSync: openConnection role=\(role == .initiator ? "initiator" : "responder") endpoint=\(endpoint)")
         let nw = NWConnection(to: endpoint, using: .tcp)
         let peer = PeerConnection(nw: nw, role: role, identity: identity,
                                   pairingPolicy: pairingPolicy, delegate: self,
-                                  queue: engineQueue)
+                                  queue: engineQueue, reconnect: reconnect)
         pending.append(peer)
         peer.start()
         // 建立成功前不登记进 connections;失败由 connectionDidClose 收尾。
@@ -786,6 +811,11 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
                 self.autoGrantedPairings.insert(info.fingerprint)
                 reply(true)
                 self.notifyMain { $0.engine(self, pairingAwaitingPeer: info) }
+            } else if info.claimsPaired {
+                // 对方以为仍与本机配对(本机移除时它不在线,或没收到 unpair):
+                // 不弹配对请求;完成握手只为在加密通道里告诉它“已移除”
+                self.unpairOnEstablish.insert(info.fingerprint)
+                reply(true)
             } else {
                 self.notifyMain { $0.engine(self, pairingRequested: info, reply: reply) }
             }
@@ -883,6 +913,7 @@ public extension SyncEngine.Delegate {
     func engine(_ engine: SyncEngine, fileAwaitingApproval id: String, name: String) {}
     func engine(_ engine: SyncEngine, pairingAwaitingPeer info: PeerConnection.PeerInfo) {}
     func engine(_ engine: SyncEngine, pairingFailed info: PeerConnection.PeerInfo, error: String) {}
+    func engine(_ engine: SyncEngine, peerUnpaired info: PeerConnection.PeerInfo) {}
 }
 
 /// 剪贴板去重缓存:哈希 → 时间戳,过期清理,容量上限。

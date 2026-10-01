@@ -20,6 +20,8 @@ public enum MessageType {
     public static let fileAck = "file_ack"
     public static let error = "error"
     public static let ping = "ping"
+    /// 加密通道内:发送方已移除与接收方的配对,接收方同样移除并断开
+    public static let unpair = "unpair"
 }
 
 public struct Message: Codable, Equatable {
@@ -33,6 +35,9 @@ public struct Message: Codable, Equatable {
     public var dhPub: String?     // 静态 ECDH 公钥 raw (base64)
     public var eph: String?       // 临时 ECDH 公钥 raw (base64)
     public var sig: String?       // auth: 对 transcriptHash 的静态签名 (base64)
+    public var paired: Bool?      // hello(仅 initiator):本端认为双方已配对、这是自动重连。
+                                  // 不进 transcript:只决定对端“弹配对请求”还是“完成握手后回 unpair”,
+                                  // 真正移除配对只认加密通道里的 unpair
 
     // file
     public var id: String?        // 传输会话 id
@@ -54,11 +59,18 @@ public struct Message: Codable, Equatable {
 
     public init() { self.type = "" }
 
-    public static func hello(fp: String, name: String, signPub: Data, dhPub: Data, eph: Data) -> Message {
-        Message(type: MessageType.hello, v: ProtocolVersion.current, fp: fp, name: name,
-                signPub: signPub.base64EncodedString(),
-                dhPub: dhPub.base64EncodedString(),
-                eph: eph.base64EncodedString())
+    public static func hello(fp: String, name: String, signPub: Data, dhPub: Data, eph: Data,
+                             paired: Bool = false) -> Message {
+        var m = Message(type: MessageType.hello, v: ProtocolVersion.current, fp: fp, name: name,
+                        signPub: signPub.base64EncodedString(),
+                        dhPub: dhPub.base64EncodedString(),
+                        eph: eph.base64EncodedString())
+        m.paired = paired ? true : nil
+        return m
+    }
+
+    public static func unpair() -> Message {
+        Message(type: MessageType.unpair)
     }
 
     public static func auth(sig: Data) -> Message {

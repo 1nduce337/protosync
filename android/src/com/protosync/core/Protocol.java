@@ -35,6 +35,8 @@ public final class Protocol {
     public static final String TYPE_FILE_ACK = "file_ack";
     public static final String TYPE_ERROR = "error";
     public static final String TYPE_PING = "ping";
+    /** 加密通道内:发送方已移除与接收方的配对,接收方同样移除并断开 */
+    public static final String TYPE_UNPAIR = "unpair";
 
     /** established 后的帧上限,与 Swift FrameCodec.maxFrameSize 对齐(旧实现 16MB 会导致 Mac 大剪贴板断连)。 */
     public static final int MAX_ESTABLISHED_FRAME = 64 * 1024 * 1024;

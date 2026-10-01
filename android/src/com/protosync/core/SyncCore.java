@@ -65,6 +65,8 @@ public final class SyncCore {
         void onFileOfferRequested(String id, String name, long size, String fromName, String fromFp);
         /** 待确认的文件请求已失效(超时/对端断开),UI 收起对应提示。 */
         void onFileOfferExpired(String id);
+        /** 对方移除了与本机的配对(本机已同步移除并断开) */
+        void onPeerUnpaired(String name, String fp);
     }
 
     public static class ActivityItem {
@@ -146,6 +148,8 @@ public final class SyncCore {
     private final Map<String, Long> pairingIntents = new HashMap<>();
     /** 因配对意图自动同意、尚未建立的对端:建立后才持久化,对方拒绝不留单方面配对记录 */
     private final Set<String> autoGrantedPairings = new HashSet<>();
+    /** 对方以为仍与本机配对、本机已移除:握手完成后只回一条 unpair 就断开,不登记连接、不记录配对 */
+    private final Set<String> unpairOnEstablish = new HashSet<>();
     private final ArrayDeque<ActivityItem> activityLog = new ArrayDeque<>();
     private final ArrayDeque<ClipItem> clipHistory = new ArrayDeque<>();
     private final ArrayDeque<ReceivedFile> recentFiles = new ArrayDeque<>();
@@ -380,11 +384,15 @@ public final class SyncCore {
         runOnEngine(() -> { if (transfers != null) transfers.resolveOffer(id, accept); });
     }
 
+    /**
+     * 移除配对。对方在线时先经加密通道发 unpair,让它也移除;
+     * 不在线时,它下次以“已配对”身份重连会收到 unpair(见 PairingPolicyImpl)。
+     */
     public void removePaired(String fp) {
         runOnEngine(() -> {
             identity.removePaired(fp);
             PeerLink established = connections.get(fp);
-            if (established != null) established.close("已取消配对");
+            if (established != null) sendUnpairAndClose(established, "已取消配对");
             for (PeerLink p : new ArrayList<>(pending)) {
                 if (fp.equals(p.peerFingerprint())) p.close("已取消配对");
             }
@@ -474,7 +482,11 @@ public final class SyncCore {
             try {
                 PeerLink link = new PeerLink(socket, role, identity, new PairingPolicyImpl(),
                         new FrameSinkImpl(), new LinkEvents());
-                if (expectedFp != null) link.setExpectedFingerprint(expectedFp);
+                if (expectedFp != null) {
+                    link.setExpectedFingerprint(expectedFp);
+                    // 拨的是已配对设备:自动重连,hello 里告诉对方
+                    link.setClaimPaired(identity.isPaired(expectedFp));
+                }
                 pending.add(link);
                 link.start();
                 if (sendHelloFirst) link.sendHello();
@@ -557,6 +569,14 @@ public final class SyncCore {
                 postEvent(() -> listener.onPairingAwaitingPeer(name, fp, sas));
                 return;
             }
+            if (link.peerClaimsPaired()) {
+                // 对方以为仍与本机配对(本机移除时它不在线,或没收到 unpair):
+                // 不弹配对请求;完成握手只为在加密通道里告诉它“已移除”
+                postLog("对方仍以为已配对,握手后通知它移除: " + fp.substring(0, Math.min(8, fp.length())));
+                unpairOnEstablish.add(fp);
+                runOnEngine(() -> link.decidePairing(true));
+                return;
+            }
             runOnEngine(() -> {
                 if (link.isClosed() || link.pairingDecided()) return;
                 pairingNames.put(fp, name);
@@ -585,6 +605,10 @@ public final class SyncCore {
         String fp = link.peerFingerprint();
         pending.remove(link);
         removeFromAwaiting(link);
+        if (unpairOnEstablish.remove(fp)) {
+            sendUnpairAndClose(link, "已移除的设备");
+            return;
+        }
         // 本机主动发起、对方已接受:双方都确认了,此时才持久化配对
         if (autoGrantedPairings.remove(fp)) {
             identity.addPaired(fp, link.peerName());
@@ -618,6 +642,11 @@ public final class SyncCore {
         pending.remove(link);
         removeFromAwaiting(link);
         String fp = link.peerFingerprint();
+        if (fp != null) {
+            boolean stillPending = false;
+            for (PeerLink p : pending) if (fp.equals(p.peerFingerprint())) stillPending = true;
+            if (!stillPending) unpairOnEstablish.remove(fp);
+        }
         if (fp == null) {
             postLog("连接关闭(未完成握手," + link.role + "): " + reason);
             return;
@@ -669,7 +698,24 @@ public final class SyncCore {
 
     // ================= established 消息分发 =================
 
+    /**
+     * 发完 unpair 再断开:先半关写端,稍后再彻底关闭
+     * (立即 close 时若还有未读的入站数据,内核会回 RST,对端可能丢掉这一帧)。
+     */
+    private void sendUnpairAndClose(PeerLink link, String reason) {
+        try {
+            link.sendSealed(new Protocol.Msg().put("type", Protocol.TYPE_UNPAIR));
+            link.retire();
+        } catch (Exception e) {
+            link.close(reason);
+            return;
+        }
+        engine.postDelayed(() -> link.close(reason), 1500);
+    }
+
     private void handleEstablished(PeerLink link, JSONObject m) {
+        // 只处理已登记的连接(被替换的重复连接、只为回 unpair 而建立的连接都不算)
+        if (link.isRetired() || connections.get(link.peerFingerprint()) != link) return;
         try {
             switch (m.getString("type")) {
                 case Protocol.TYPE_CLIPBOARD: {
@@ -707,6 +753,17 @@ public final class SyncCore {
                 case Protocol.TYPE_FILE_DONE: transfers.handleDone(link, m); break;
                 case Protocol.TYPE_FILE_ACK: transfers.handleAck(m); break;
                 case Protocol.TYPE_PING: break; // 判活只看 lastInboundAt
+                case Protocol.TYPE_UNPAIR: {
+                    // 来自已认证的加密通道:对方移除了配对,本机同步移除,不再自动重连
+                    String fp = link.peerFingerprint();
+                    String name = link.peerName();
+                    postLog("「" + name + "」移除了配对");
+                    identity.removePaired(fp);
+                    link.close("对方已移除配对");
+                    postEvent(() -> listener.onPeerUnpaired(name, fp));
+                    postEvent(() -> listener.onDiscoveredChanged());
+                    break;
+                }
                 default: break;
             }
         } catch (Throwable e) {

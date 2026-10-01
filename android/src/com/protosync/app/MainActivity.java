@@ -820,6 +820,11 @@ public class MainActivity extends Activity implements SyncService.Ui {
         toast("未能与「" + name + "」配对：" + reason);
     }
 
+    @Override public void onPeerUnpaired(String name, String fp) {
+        onStateChanged();
+        toast("「" + name + "」移除了与本机的配对");
+    }
+
     @Override public void onFileOfferRequested(String id, String name, long size, String fromName, String fromFp) {
         OfferUi o = new OfferUi();
         o.id = id;

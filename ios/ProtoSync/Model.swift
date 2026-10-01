@@ -370,6 +370,16 @@ final class IOSAppModel: ObservableObject, @preconcurrency SyncEngine.Delegate {
         refresh()
     }
 
+    func engine(_ engine: SyncEngine, peerUnpaired info: PeerConnection.PeerInfo) {
+        let notice = "「\(info.name)」移除了与本机的配对"
+        pairingNotice = notice
+        log(notice)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+            if self?.pairingNotice == notice { self?.pairingNotice = nil }
+        }
+        refresh()
+    }
+
     func engine(_ engine: SyncEngine, didReceiveClipboardText text: String, from peer: PeerConnection.PeerInfo) {
         UIPasteboard.general.string = text
         recordClip(.text(text), source: peer.name)

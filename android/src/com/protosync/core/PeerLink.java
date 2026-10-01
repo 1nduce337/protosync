@@ -60,6 +60,12 @@ public final class PeerLink {
     private long pairingDecidedAt = createdAt;
     /** 出站拨号时期望的对端指纹(NSD 记录可能过期指向别的设备);null = 不校验。 */
     private volatile String expectedFp;
+    /** initiator:本机认为已与对方配对(自动重连),hello 里带 paired */
+    private volatile boolean claimPaired = false;
+    /** 对端 hello 声称双方已配对;未经认证,只决定怎么回应 */
+    private boolean peerClaimsPaired = false;
+    /** 已发出 unpair、等待关闭:不再处理它的业务消息 */
+    private volatile boolean retired = false;
 
     public PeerLink(Socket socket, Role role, IdentityStore identity,
                     PairingPolicy pairingPolicy, FrameSink frameSink, Events events) throws IOException {
@@ -88,6 +94,9 @@ public final class PeerLink {
     public InetSocketAddress remoteAddress() { return (InetSocketAddress) socket.getRemoteSocketAddress(); }
     public void setExpectedFingerprint(String fp) { this.expectedFp = fp; }
     public String expectedFingerprint() { return expectedFp; }
+    public void setClaimPaired(boolean v) { this.claimPaired = v; }
+    public boolean peerClaimsPaired() { return peerClaimsPaired; }
+    public boolean isRetired() { return retired; }
 
     /** established 后解密一帧(引擎线程调用)。 */
     public JSONObject openSealed(byte[] payload) throws Exception {
@@ -114,6 +123,12 @@ public final class PeerLink {
         } catch (Exception e) {
             if (!closed) frameSink.onReadFailure(this, e);
         }
+    }
+
+    /** 发完最后一帧后半关写端(FIN 排在数据之后),并停止处理对端的业务消息。 */
+    public void retire() {
+        retired = true;
+        try { socket.shutdownOutput(); } catch (IOException ignored) {}
     }
 
     /** 只能在引擎线程调用;幂等。 */
@@ -153,6 +168,8 @@ public final class PeerLink {
                 .put("signPub", Crypto.b64encodeToString(identity.signPub64))
                 .put("dhPub", Crypto.b64encodeToString(identity.dhPub64))
                 .put("eph", Crypto.b64encodeToString(Crypto.rawPublic(myEph)));
+        // 不进 transcript:真正移除配对只认加密通道里的 unpair
+        if (claimPaired && role == Role.INITIATOR) m.put("paired", true);
         sendHandshake(m);
     }
 
@@ -174,6 +191,7 @@ public final class PeerLink {
         if (myHelloName == null) myHelloName = identity.deviceName();
         peerFp = fp;
         peerName = name;
+        peerClaimsPaired = m.optBoolean("paired", false);
         peerSign64 = signPub;
         peerDh64 = dhPub;
         peerEph64 = eph;

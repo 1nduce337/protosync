@@ -95,6 +95,33 @@ do {
     print("❌ 握手测试异常: \(error)")
 }
 
+// MARK: - 重连标记与 unpair
+
+do {
+    let alice = try IdentityStore(directory: tempDir("re-a"), deviceName: "Alice")
+    let bob = try IdentityStore(directory: tempDir("re-b"), deviceName: "Bob")
+    let client = SecureChannel(identity: alice.identity, role: .initiator)
+    let server = SecureChannel(identity: bob.identity, role: .responder)
+    let hello = client.makeHello(paired: true)
+    check(hello.paired == true, "重连:hello 带 paired")
+    // 线上 JSON 也必须带上(Java 端按 "paired" 键读取)
+    let json = String(data: try hello.encodedData(), encoding: .utf8) ?? ""
+    check(json.contains("\"paired\":true"), "重连:JSON 含 \"paired\":true")
+    try server.acceptPeerHello(hello)
+    try client.acceptPeerHello(server.makeHello())
+    check(server.peerClaimsPaired, "重连:应答方看到 paired")
+    check(!client.peerClaimsPaired, "重连:应答方的 hello 不带 paired")
+    check(!(String(data: try SecureChannel(identity: alice.identity, role: .initiator).makeHello().encodedData(),
+                   encoding: .utf8) ?? "").contains("paired"), "重连:默认 hello 不含 paired 键")
+
+    try server.verifyAuth(try client.makeAuth())
+    try client.verifyAuth(try server.makeAuth())
+    check(try client.open(try server.seal(.unpair())).type == MessageType.unpair, "unpair:经加密通道送达")
+} catch {
+    failures += 1
+    print("❌ 重连测试异常: \(error)")
+}
+
 do {
     let alice = try IdentityStore(directory: tempDir("fp-a"), deviceName: "A")
     let bob = try IdentityStore(directory: tempDir("fp-b"), deviceName: "B")

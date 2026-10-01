@@ -247,6 +247,15 @@ final class AppModel: ObservableObject, SyncEngine.Delegate {
         refresh()
     }
 
+    func engine(_ engine: SyncEngine, peerUnpaired info: PeerConnection.PeerInfo) {
+        let notice = "「\(info.name)」移除了与这台 Mac 的配对"
+        pairingNotice = notice
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+            if self?.pairingNotice == notice { self?.pairingNotice = nil }
+        }
+        refresh()
+    }
+
     func engine(_ engine: SyncEngine, fileOfferRequested offer: SyncEngine.FileOfferRequest,
                 reply: @escaping (Bool) -> Void) {
         fileOffers.append(FileOfferPrompt(offer: offer, reply: reply))

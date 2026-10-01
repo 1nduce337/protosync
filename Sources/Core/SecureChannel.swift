@@ -25,6 +25,8 @@ public final class SecureChannel {
     public let role: Role
     public private(set) var peerFingerprint: String?
     public private(set) var peerName: String?
+    /// 对端 hello 声称双方已配对(自动重连)
+    public private(set) var peerClaimsPaired = false
     public private(set) var peerSignPub: P256.Signing.PublicKey?
     public private(set) var peerDhPub: P256.KeyAgreement.PublicKey?
     /// 6 位配对码(“123 456”):两端由同一 transcript 推导,配对时让用户核对两块屏幕上的码是否一致。
@@ -45,7 +47,7 @@ public final class SecureChannel {
 
     // MARK: - 握手
 
-    public func makeHello() -> Message {
+    public func makeHello(paired: Bool = false) -> Message {
         // initiator 在连接就绪时调用;responder 在收到对端 hello(已生成 eph)后调用,
         // 两者都必须复用同一把临时密钥,否则密钥派生会错位。
         if myEph == nil { myEph = P256.KeyAgreement.PrivateKey() }
@@ -54,7 +56,8 @@ public final class SecureChannel {
             name: identity.name,
             signPub: identity.signingKey.publicKey.rawRepresentation,
             dhPub: identity.dhKey.publicKey.rawRepresentation,
-            eph: myEph!.publicKey.rawRepresentation
+            eph: myEph!.publicKey.rawRepresentation,
+            paired: paired
         )
     }
 
@@ -83,6 +86,7 @@ public final class SecureChannel {
 
         peerFingerprint = fp
         peerName = name
+        peerClaimsPaired = message.paired == true
         peerSignPub = signPub
         peerDhPub = dhPub
 

@@ -24,10 +24,13 @@ public final class PeerConnection {
         public var name: String
         /// 本次握手的配对码(两端一致);非握手来源的 PeerInfo 为 nil
         public var sas: String?
-        public init(fingerprint: String, name: String, sas: String? = nil) {
+        /// 对端 hello 声称双方已配对(它在自动重连);未经认证,只用于决定怎么回应
+        public var claimsPaired: Bool
+        public init(fingerprint: String, name: String, sas: String? = nil, claimsPaired: Bool = false) {
             self.fingerprint = fingerprint
             self.name = name
             self.sas = sas
+            self.claimsPaired = claimsPaired
         }
     }
 
@@ -38,6 +41,8 @@ public final class PeerConnection {
     private weak var delegate: Delegate?
     private let identity: DeviceIdentity
     private let pairingPolicy: PairingPolicy
+    /// initiator:本端认为已与对方配对(自动重连),hello 里带上 paired
+    private let reconnect: Bool
 
     private let channel: SecureChannel
     private let codec = FrameCodec()
@@ -55,8 +60,10 @@ public final class PeerConnection {
     public private(set) var lastInboundAt = Date()
 
     public init(nw: NWConnection, role: SecureChannel.Role, identity: DeviceIdentity,
-         pairingPolicy: @escaping PairingPolicy, delegate: Delegate, queue: DispatchQueue) {
+         pairingPolicy: @escaping PairingPolicy, delegate: Delegate, queue: DispatchQueue,
+         reconnect: Bool = false) {
         self.nw = nw
+        self.reconnect = reconnect
         self.role = role
         self.identity = identity
         self.pairingPolicy = pairingPolicy
@@ -112,10 +119,24 @@ public final class PeerConnection {
         }
     }
 
+    /// 发完这一条再关闭(用于 unpair:必须送达后才断开)。
+    public func sendThenShutdown(_ message: Message) {
+        workQueue.async { [weak self] in
+            guard let self, !self.isClosed else { return }
+            guard self.state == .established, let sealed = try? self.channel.seal(message) else {
+                self.close(withError: nil)
+                return
+            }
+            self.nw.send(content: FrameCodec.wrap(sealed), completion: .contentProcessed { [weak self] _ in
+                self?.close(withError: nil)
+            })
+        }
+    }
+
     // MARK: - 握手
 
     private func beginHandshake() {
-        sendHandshakeFrame(channel.makeHello())
+        sendHandshakeFrame(channel.makeHello(paired: reconnect))
     }
 
     private func completeAuth(_ message: Message) throws {
@@ -138,7 +159,7 @@ public final class PeerConnection {
                 }
                 try channel.acceptPeerHello(message)
                 let info = PeerInfo(fingerprint: channel.peerFingerprint!, name: channel.peerName ?? "未知设备",
-                                    sas: channel.sasCode)
+                                    sas: channel.sasCode, claimsPaired: channel.peerClaimsPaired)
                 peerInfo = info
                 // responder 收到对方 hello 后,要先回自己的 hello 再进入 auth 阶段。
                 if role == .responder {

@@ -63,4 +63,9 @@ for i in 1 2 3 4; do
     sleep 1
 done
 [ "$SIGN_OK" = "1" ] || { echo "⚠️ codesign 多次重试后仍失败(iCloud 同步竞态)"; exit 1; }
+
+# 向 LaunchServices 重新登记,让 Finder 与通知中心拿到最新图标
+# (通知中心按首次登记时缓存图标:没有图标时登记过的旧版本,通知里会一直显示空白图标)
+LSREGISTER=/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+[ -x "$LSREGISTER" ] && "$LSREGISTER" -f "$APP" >/dev/null 2>&1 || true
 echo "✅ 已生成 $APP(双击运行,菜单栏出现图标)"

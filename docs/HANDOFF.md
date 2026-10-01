@@ -3,7 +3,7 @@
 Shared status between Claude Code sessions (local Mac and cloud). Update before ending a session.
 No private data here — see "Privacy" in `CLAUDE.md`.
 
-_Last updated: 2026-10-01 (cloud session, Round 10)_
+_Last updated: 2026-10-01 (cloud session, Round 11)_
 
 ## In progress: menu-bar panel UI (branch `feat/menubar-popover-ui`)
 
@@ -178,6 +178,24 @@ The user reported two bugs:
   3. Tag `v0.0.1` and push the tag.
   4. Create the GitHub pre-release "ProtoSync 0.0.1" with `docs/releases/v0.0.1.md` as the body and the three `dist/` files attached.
   5. If `gh` isn't set up, the user creates the release on github.com (Releases → Draft a new release) and uploads the files from `dist/`.
+
+### Round 11 (cloud; Android compiles + harness 34/34, Swift unverified): removing a device now removes it on both sides; notification icon
+
+- **Bug (from device testing):** removing the Mac on Android left the Mac still "paired". The Mac kept auto-reconnecting, and Android showed a new pairing request every time.
+- **Fix (Swift and Java, same branch; no version bump, older v2 peers ignore both additions):**
+  - new sealed message `unpair`. `removePairedDevice` / `removePaired` send it to the online peer, then close. The receiver removes the pairing, disconnects and tells the UI ("「X」移除了与这台 Mac 的配对" / an Android toast).
+  - new `hello.paired: true` (initiator only, on auto-reconnect to a stored pairing). A responder that no longer has the pairing does not prompt: it completes the handshake, sends `unpair` and closes (`unpairOnEstablish`). This covers the case where the peer was offline when it was removed.
+  - `paired` is outside the transcript and unauthenticated. A forged flag can only suppress a pairing prompt; removal requires the sealed `unpair`.
+  - Messages are now processed only from registered connections (Swift `handleMessage`, Java `handleEstablished`), so the short-lived `unpair` connection can't deliver clipboard data. Java also ignores a link after `retire()`.
+  - Java sends `unpair`, half-closes the socket (`shutdownOutput`), then closes 1.5 s later, so the frame isn't lost to an RST. Swift closes once `nw.send` has handed the frame off.
+  - New delegate/listener callbacks: Swift `peerUnpaired` (macOS + iOS implement it), Java `onPeerUnpaired` (SyncService → MainActivity).
+- **Tests:** JVM harness +7 (paired flag over the wire, unpair after half-close, EOF closes the peer): 34/34. `protosync-tests` gained a "重连标记与 unpair" block (not run: cloud has no Swift).
+- **Notification icon was blank:** the iconset is fine. Notification Center caches the icon from when the app was first registered, which was before it had one. `make-app.sh` now runs `lsregister -f` on the built app. The Mac also needs a one-time cache reset (see the next steps).
+- **Next on the Mac:**
+  1. `swift build && swift run protosync-tests`, `./scripts/make-app.sh`, `./android/build_apk.sh`, install on the phone.
+  2. Notification icon: quit ProtoSync, move `ProtoSync.app` to `/Applications` and open it from there, then run `killall usernoted NotificationCenter` (both restart by themselves). If the icon is still blank, remove ProtoSync from System Settings › Notifications and launch it again.
+  3. Device test: pair, then remove on Android → the Mac drops it within a second, with no new pairing request. Then the reverse. Then remove on one side while the other is offline/quit → when it comes back, it drops the pairing with no prompt.
+  4. Then the Round 10 checks, then the release (Round 9 steps).
 
 ### Round 10 (cloud; Swift unverified): macOS notifications fixed, "received" indicator in the menu bar
 

@@ -148,6 +148,7 @@ public class SyncService extends Service {
         void onActivityChanged();
         void onFileOfferRequested(String id, String name, long size, String fromName, String fromFp);
         void onFileOfferExpired(String id);
+        void onPeerUnpaired(String name, String fp);
     }
 
     /** UI 可见且屏幕亮着才算「在场」;息屏时即使 Activity 未走 onStop 也按后台处理(走横幅通知)。 */
@@ -354,6 +355,10 @@ public class SyncService extends Service {
         }
         @Override public void onFileOfferExpired(String id) {
             dropOffer(id);
+        }
+        @Override public void onPeerUnpaired(String name, String fp) {
+            updateNotification();
+            Ui d = currentUi(); if (d != null) d.onPeerUnpaired(name, fp);
         }
     };
 
