@@ -3,7 +3,7 @@
 Shared status between Claude Code sessions (local Mac and cloud). Update before ending a session.
 No private data here — see "Privacy" in `CLAUDE.md`.
 
-_Last updated: 2026-10-01 (cloud session)_
+_Last updated: 2026-10-01 (local Mac session)_
 
 ## In progress: menu-bar panel UI (branch `feat/menubar-popover-ui`)
 
@@ -15,10 +15,13 @@ Design direction B was chosen (spec: `docs/design/MENUBAR_PANEL.md`).
   - new "同步剪贴板" switch (pauses sending; persisted in `UserDefaults` key `clipboardSyncEnabled`);
   - clipboard history is in memory only.
 - **Engine API change:** `didReceiveClipboardText/Image` now pass `from peer: PeerConnection.PeerInfo`. The Mac app, iOS app and CLI peer are updated.
-- ⚠️ **Not compiled yet** (written in the cloud). Next on the Mac:
-  1. Run `swift build` and `swift run protosync-tests`, and fix any errors.
-  2. Run `./scripts/make-app.sh` and check the panel by hand: drag a file onto an avatar, click a history item to re-copy, check the pairing/file-request cards, right-click menu and the switch.
-  3. Build the iOS app (only a signature change there).
+- ✅ **Compiled on the Mac (no fixes needed):** `swift build` (warnings only, pre-existing style), `swift run protosync-tests` 45/45, `./scripts/make-app.sh`, iOS simulator build (xcodegen + xcodebuild, unsigned). The app launches and stays running.
+- ⚠️ **Not checked by hand yet** (needs a person at the Mac; the agent can't click the menu bar or drag files):
+  1. left-click opens the panel, right-click opens the classic menu;
+  2. dragging a file onto a device avatar sends it;
+  3. clicking a history item copies it again;
+  4. the "同步剪贴板" switch stops sending;
+  5. pairing and file-request cards show up in the panel.
 - **Next after that:** restyle the 设备与设置 window, then the iOS screen (B-iPhone mockup), then Android.
 
 ## Folder reorganisation (merged into `main`)
