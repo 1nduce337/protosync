@@ -3,7 +3,17 @@
 Shared status between Claude Code sessions (local Mac and cloud). Update before ending a session.
 No private data here — see "Privacy" in `CLAUDE.md`.
 
-_Last updated: 2026-10-01 (local Mac session)_
+_Last updated: 2026-10-01 (local Mac session, chore/cleanup)_
+
+## Cleanup (branch `chore/cleanup`, not merged)
+
+Branched from `main`; `feat/menubar-popover-ui` was not touched. Three separate commits. After each step: `swift build`, `swift run protosync-tests` (45/45 on this branch) and `./android/build_apk.sh` all passed.
+- **Step 1:** the user backed up the Android debug keystore outside the repo before anything was deleted (it is gitignored and has no other copy).
+- **Step 2:** removed `android/legacy-backup/` (3 old Java files, unreferenced by code). Also deleted ignored leftovers: the legacy-UI backup `.app`, the demo `.app.bak`, and the `*.bak-*` files under `ios/`. Kept the current `ProtoSync.app` / `ProtoSyncUIDemo.app` builds and the scaffold's build directories.
+- **Step 2, skipped on purpose:** `DashboardView.swift` is still referenced on `main` (`main.swift` has the legacy-UI switch), so deleting it would change behaviour. The `feat/menubar-popover-ui` branch already removes it together with the switch; it goes away when that branch merges.
+- **Step 3:** a clean build had two warnings, both fixed with no behaviour change: an explicit `[self]` capture in `SyncEngine.requestOfferDecision`, and `else if url != nil` in `AppModel`. A clean build now prints none.
+- ⚠️ Not run: `./scripts/make-app.sh`, the iOS build (neither the iOS sources nor the app bundle script were changed).
+- Merge note: `feat/menubar-popover-ui` rewrites `AppModel.swift`, so the one-line `url != nil` change may conflict there; keep whichever side compiles.
 
 ## Folder reorganisation (merged into `main`)
 
