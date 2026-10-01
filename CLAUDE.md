@@ -46,6 +46,16 @@ cd ios && xcodegen generate && open ProtoSync.xcodeproj
 adb install -r android/build/ProtoSync-android.apk
 ```
 
+## Releases
+
+- **Version numbers** live in two places:
+  - macOS: `CFBundleShortVersionString` / `CFBundleVersion` in `scripts/make-app.sh`;
+  - Android: `versionName` / `versionCode` in `android/AndroidManifest.xml`. `versionCode` must always increase, or phones refuse the update.
+- **Notes:** add an entry to `CHANGELOG.md` and a full `docs/releases/vX.Y.Z.md`, which is used as the GitHub release body.
+- **Build:** `scripts/package-release.sh X.Y.Z` on the Mac. It runs the tests and writes `dist/ProtoSync-X.Y.Z-macOS.zip`, `-android.apk` and `-SHA256.txt`.
+- **Publish:** tag `vX.Y.Z` on `main` and attach the three `dist/` files to the GitHub release.
+- **Signing key:** the APK is signed with `android/debug.keystore`, which lives only on the Mac and is gitignored. Every release must use the same keystore, so back it up and never commit it.
+
 ## Protocol rules (most important)
 
 Swift (`Sources/Core`) and Java (`android/src/com/protosync/core`) implement the **same wire protocol byte for byte**.

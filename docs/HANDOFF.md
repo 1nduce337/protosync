@@ -139,6 +139,30 @@ The user reported two bugs:
   - the Finder / Dock icon and the menu-bar template icon on screen (screen capture was not permitted, so the agent could not look);
   - `killall Finder` was not run; do it (or `touch ProtoSync.app`) if Finder shows the old icon.
 
+### Round 8 (cloud): README rewrite and the 0.0.1 release prep (macOS + Android)
+
+- **README** rewritten for the new design:
+  - download table and the macOS first-launch (Gatekeeper) note;
+  - quick start with the 6-digit pairing flow;
+  - updated feature table, security model, build/release commands and roadmap.
+  - It references four screenshots that **don't exist yet**: `docs/img/macos-panel.png`, `docs/img/macos-settings.png`, `docs/img/android-main.png`, `docs/img/pairing.png`. The user will supply them.
+- **Version 0.0.1:**
+  - macOS `CFBundleShortVersionString` 0.0.1 / `CFBundleVersion` 2;
+  - Android `versionName` 0.0.1 / `versionCode` **4** (it must exceed the installed 3, or the update won't install in place).
+- **Release files:**
+  - `CHANGELOG.md`;
+  - `docs/releases/v0.0.1.md` (the GitHub release body, including install steps and caveats);
+  - `scripts/package-release.sh` (checks versions, runs the tests, builds both apps, writes `dist/` with SHA-256);
+  - `dist/` is gitignored.
+- **CLAUDE.md** gains a "Releases" section.
+- ⚠️ **Not run:** the packaging script (macOS-only tools). There is no GitHub release tool in the cloud session, so tagging and publishing happen on the Mac.
+- **Next on the Mac:**
+  1. Add the four screenshots. Before committing them, crop or blur IP addresses and personal device names (see "Privacy" in `CLAUDE.md`).
+  2. Merge `feat/menubar-popover-ui` into `main`.
+  3. On `main`, run `scripts/package-release.sh 0.0.1`.
+  4. Tag `v0.0.1` and push the tag.
+  5. Create the GitHub release "ProtoSync 0.0.1" from that tag, with `docs/releases/v0.0.1.md` as the body, attaching `dist/ProtoSync-0.0.1-macOS.zip`, `dist/ProtoSync-0.0.1-android.apk` and `dist/ProtoSync-0.0.1-SHA256.txt`. Mark it as a pre-release.
+
 ## Folder reorganisation (merged into `main`)
 
 - Moved `ProtoSyncUIDemo/` and `android-compose-scaffold/` into `tools/`; moved `design/` into `docs/design/`.

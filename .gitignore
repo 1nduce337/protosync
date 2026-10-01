@@ -39,3 +39,6 @@ tools/android-compose-scaffold/build/
 tools/android-compose-scaffold/app/build/
 tools/android-compose-scaffold/app/.cxx/
 tools/android-compose-scaffold/local.properties
+
+# ---- 发布产物(scripts/package-release.sh)----
+dist/
