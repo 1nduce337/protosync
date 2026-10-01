@@ -94,22 +94,24 @@ struct SettingsView: View {
                     .onSubmit { model.store.renameDevice(model.deviceName) }
             }
             LabeledContent("指纹") {
-                Text(groupedFPText(model.store.identity.fingerprint))
-                    .font(.system(size: 11, design: .monospaced))
-                    .multilineTextAlignment(.trailing)
-                    .textSelection(.enabled)
+                HStack(spacing: 8) {
+                    // 配对时核对的是前 8 位;完整值放在悬停提示和复制按钮里,不占版面
+                    Text(shortFPText(model.store.identity.fingerprint))
+                        .font(.body.monospacedDigit())
+                        .textSelection(.enabled)
+                    Button("复制完整指纹") { copyToPasteboard(model.store.identity.fingerprint) }
+                        .controlSize(.small)
+                }
+                .help(groupedFPText(model.store.identity.fingerprint))
             }
             LabeledContent("本机地址") {
                 HStack(spacing: 8) {
                     Text(localAddress ?? "未连接网络")
-                        .font(.system(.body, design: .monospaced))
+                        .font(.body.monospacedDigit())
                         .foregroundStyle(localAddress == nil ? Color.secondary : Color.primary)
                         .textSelection(.enabled)
                     if let localAddress {
-                        Button("复制") {
-                            NSPasteboard.general.clearContents()
-                            NSPasteboard.general.setString(localAddress, forType: .string)
-                        }
+                        Button("复制") { copyToPasteboard(localAddress) }
                         .controlSize(.small)
                     }
                 }
@@ -117,7 +119,7 @@ struct SettingsView: View {
         } header: {
             Text("本机")
         } footer: {
-            Text("改名后按回车保存，新名字在下次连接时生效。配对时双方核对的是指纹的前 8 位。")
+            footnote("改名后按回车保存，新名字在下次连接时生效。配对时双方核对的是指纹的前 8 位。")
         }
     }
 
@@ -152,26 +154,35 @@ struct SettingsView: View {
                         }
                     }
                     Spacer()
-                    Toggle("自动接收文件", isOn: Binding(
-                        get: { row.filesTrusted },
-                        set: { model.setFileTrust(fingerprint: row.fingerprint, trusted: $0) }))
+                    Text("自动接收")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    Toggle("自动接收 \(row.name) 的文件", isOn: fileTrustBinding(row))
+                        .labelsHidden()
                         .toggleStyle(.switch)
                         .controlSize(.small)
-                    Button {
-                        pendingRemoval = row
+                    Menu {
+                        Button("移除此设备…", role: .destructive) { pendingRemoval = row }
                     } label: {
-                        Image(systemName: "minus.circle")
+                        Image(systemName: "ellipsis.circle")
+                            .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.borderless)
-                    .help("移除此设备")
-                    .accessibilityLabel("移除 \(row.name)")
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .fixedSize()
+                    .accessibilityLabel("\(row.name) 的更多操作")
                 }
                 .padding(.vertical, 2)
+                .contextMenu {
+                    Toggle("自动接收文件", isOn: fileTrustBinding(row))
+                    Divider()
+                    Button("移除此设备…", role: .destructive) { pendingRemoval = row }
+                }
             }
         } header: {
             Text("已配对设备")
         } footer: {
-            Text("关闭“自动接收文件”后，这台设备发来的每个文件都需要你确认，2 分钟未处理自动拒绝。")
+            footnote("关闭“自动接收”后，这台设备发来的每个文件都需要你确认，2 分钟未处理自动拒绝。")
         }
     }
 
@@ -211,7 +222,7 @@ struct SettingsView: View {
         } header: {
             Text("剪贴板")
         } footer: {
-            Text("关闭后台读取后，只在菜单栏面板或本窗口打开时同步。密码管理器复制的内容（如 1Password、钥匙串）不会被同步，也不会进入历史。")
+            footnote("关闭后台读取后，只在菜单栏面板或本窗口打开时同步。密码管理器复制的内容（如 1Password、钥匙串）不会被同步，也不会进入历史。")
         }
     }
 
@@ -243,6 +254,25 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    // MARK: - 工具
+
+    private func footnote(_ text: String) -> some View {
+        Text(text)
+            .font(.callout)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func fileTrustBinding(_ row: DeviceRow) -> Binding<Bool> {
+        Binding(get: { row.filesTrusted },
+                set: { model.setFileTrust(fingerprint: row.fingerprint, trusted: $0) })
+    }
+
+    private func copyToPasteboard(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 
     private func abbreviatedPath(_ url: URL) -> String {

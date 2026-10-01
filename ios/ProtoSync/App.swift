@@ -92,7 +92,9 @@ struct RootView: View {
                     .font(.system(size: 19))
                     .foregroundStyle(.secondary)
                     .frame(width: 44, height: 44, alignment: .trailing)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)   // 不继承 Lime 强调色:Lime 只给主按钮
             .accessibilityLabel("设置")
             .disabled(!model.ready)
         }
