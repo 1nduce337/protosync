@@ -10,9 +10,9 @@ _Last updated: 2026-10-01 (cloud session: merged into `main` for the 0.0.1 relea
 - `feat/menubar-popover-ui` (Rounds 2–11) and `chore/cleanup` are merged into `main`. The user chose to skip most of the manual checks.
 - ✅ **Round 11 Swift changes compile.** `scripts/package-release.sh 0.0.1` ran on `main` (7df2201) with no fixes needed: tests 54/54, macOS and Android builds OK. Output in `dist/` (gitignored): `ProtoSync-0.0.1-macOS.zip`, `ProtoSync-0.0.1-android.apk`, `ProtoSync-0.0.1-SHA256.txt`.
 - ✅ **Tag `v0.0.1` created and pushed** (points at 7df2201).
-- ⚠️ **GitHub release not created:** `gh` is installed but not logged in. Either run `gh auth login` and then the command in step 4, or create the pre-release "ProtoSync 0.0.1" in the web UI from tag `v0.0.1`, with `docs/releases/v0.0.1.md` as the body and the three `dist/` files attached. Mark it as a pre-release.
+- ✅ **GitHub pre-release published:** https://github.com/1nduce337/protosync/releases/tag/v0.0.1 ("ProtoSync 0.0.1", pre-release, body from `docs/releases/v0.0.1.md`, the three `dist/` files attached; checksums matched before upload).
 - ⚠️ The release build was not installed or tested on real devices.
-- **Release steps (steps 1–3 are done):**
+- **Release steps (all done):**
   1. `git switch main && git pull`.
   2. `scripts/package-release.sh 0.0.1` → `dist/ProtoSync-0.0.1-macOS.zip`, `-android.apk`, `-SHA256.txt`.
   3. `git tag v0.0.1 && git push origin v0.0.1`.
