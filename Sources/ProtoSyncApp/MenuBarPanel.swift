@@ -5,41 +5,6 @@ import Core
 // 日常操作都在这里完成:设备头像(拖文件即发送)、配对、文件请求、传输进度、剪贴板历史。
 // 弹出面板固定深色外观(AppDelegate 设置 darkAqua),Lime 只用于主按钮、在线点与拖放高亮。
 
-enum Panel {
-    static let accent = Color(signal: 0xE7FF16)
-    static let onAccent = Signal.ink900
-    static let fill = Color.white.opacity(0.06)
-    static let fillStrong = Color.white.opacity(0.11)
-    static let mono = Font.system(size: 11).monospacedDigit()
-
-    /// 设备类型图标:协议不携带设备类型,按设备名推断(只影响图标)
-    static func glyph(for name: String) -> String {
-        let n = name.lowercased()
-        if n.contains("iphone") { return "iphone" }
-        if n.contains("ipad") { return "ipad" }
-        if n.contains("macbook") { return "laptopcomputer" }
-        if n.contains("imac") || n.contains("mac mini") || n.contains("mac studio") || n.contains("mac pro") {
-            return "desktopcomputer"
-        }
-        return "candybarphone"
-    }
-}
-
-struct PanelButtonStyle: ButtonStyle {
-    var prominent = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 12, weight: prominent ? .semibold : .regular))
-            .foregroundStyle(prominent ? Panel.onAccent : Color.primary)
-            .padding(.horizontal, 10)
-            .frame(maxWidth: .infinity, minHeight: 28)
-            .background(prominent ? Panel.accent : Panel.fillStrong,
-                        in: RoundedRectangle(cornerRadius: 6))
-            .opacity(configuration.isPressed ? 0.75 : 1)
-    }
-}
-
 struct MenuBarPanel: View {
     @ObservedObject var model: AppModel
     var openSettings: () -> Void
@@ -78,7 +43,7 @@ struct MenuBarPanel: View {
             .toggleStyle(.switch)
             .controlSize(.mini)
             .tint(Panel.accent)
-            .help("关闭后本机复制的内容不再发给其他设备,仍会接收其他设备的剪贴板")
+            .help("关闭后本机复制的内容不再发给其他设备，仍会接收其他设备的剪贴板")
             Menu {
                 Button("设备与设置…", action: openSettings)
                 Button("打开收件箱") { model.revealInbox() }
@@ -209,7 +174,7 @@ struct MenuBarPanel: View {
             .padding(.bottom, 4)
             if model.clipHistory.isEmpty {
                 Text(model.clipboardSyncEnabled
-                     ? "复制的内容会出现在这里,并同步到在线设备。"
+                     ? "复制的内容会出现在这里，并同步到在线设备。"
                      : "剪贴板同步已暂停。其他设备发来的内容仍会出现在这里。")
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
@@ -238,7 +203,7 @@ struct MenuBarPanel: View {
 // MARK: - 设备头像
 
 struct PanelDeviceAvatar: View {
-    let row: SignalDeviceRow
+    let row: DeviceRow
     @ObservedObject var model: AppModel
     @State private var targeted = false
 
@@ -274,7 +239,7 @@ struct PanelDeviceAvatar: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(row.online ? "点按选择文件,或把文件拖到这里发送给 \(row.name)" : "\(row.name) 当前离线")
+        .help(row.online ? "点按选择文件，或把文件拖到这里发送给 \(row.name)" : "\(row.name) 当前离线")
         .dropDestination(for: URL.self) { urls, _ in
             guard row.online else { return false }
             // 只发普通文件:文件夹暂不支持(单文件协议)
@@ -315,7 +280,7 @@ struct PanelPairingCard: View {
                 .font(.system(size: 12, weight: .semibold))
             HStack(spacing: 6) {
                 Text("指纹").font(.system(size: 11)).foregroundStyle(.secondary)
-                Text(signalFPText(request.info.fingerprint))
+                Text(shortFPText(request.info.fingerprint))
                     .font(.system(size: 13, weight: .medium).monospacedDigit())
             }
             Text("确认对方屏幕上显示同一指纹后再接受。")
@@ -358,7 +323,7 @@ struct PanelOfferCard: View {
                     .buttonStyle(.plain)
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
-                    .help("接收,并以后自动接收 \(prompt.offer.from.name) 的文件")
+                    .help("接收，并以后自动接收 \(prompt.offer.from.name) 的文件")
                     .padding(.horizontal, 6)
             }
         }

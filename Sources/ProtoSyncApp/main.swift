@@ -34,6 +34,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 表现为"挂在后台不读剪贴板"。持有 user-initiated activity 令牌即可豁免。
     private var napActivity: NSObjectProtocol?
     private func updateNapActivity() {
+        // 设置窗口经 @AppStorage 改这个键,任何默认值变化都会触发这里:状态没变就不动
+        if backgroundReading == (napActivity != nil) { return }
         if let napActivity { ProcessInfo.processInfo.endActivity(napActivity); self.napActivity = nil }
         guard backgroundReading else { return }
         napActivity = ProcessInfo.processInfo.beginActivity(
@@ -108,6 +110,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         setupStatusItem()
         setupClipboardMonitor()
         updateNapActivity()
+        NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil,
+                                               queue: .main) { [weak self] _ in
+            self?.updateNapActivity()
+        }
 
         if Bundle.main.bundleIdentifier != nil {
             UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { _, _ in }
@@ -196,34 +202,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func showMainWindow() {
         if window == nil {
-            window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 680),
+            window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 660),
                               styleMask: [.titled, .closable, .resizable, .miniaturizable],
                               backing: .buffered, defer: false)
             window.title = "ProtoSync · 设备与设置"
-            window.contentView = NSHostingView(rootView: makeRootView())
+            window.contentView = NSHostingView(rootView: SettingsView(model: model))
             window.center()
             window.isReleasedWhenClosed = false
         }
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
-    }
-
-    // MARK: - 界面选择(Signal Foundry 新版 / 旧版卡片,UserDefaults 持久化)
-
-    private var legacyUI: Bool {
-        UserDefaults.standard.bool(forKey: "useLegacyUI")
-    }
-
-    private func makeRootView() -> AnyView {
-        legacyUI ? AnyView(DashboardView(model: model))
-                 : AnyView(SignalFoundryRootView(model: model))
-    }
-
-    @objc private func toggleUI() {
-        UserDefaults.standard.set(!legacyUI, forKey: "useLegacyUI")
-        if let window {
-            window.contentView = NSHostingView(rootView: makeRootView())
-        }
     }
 
     @objc private func toggleBackgroundReading() {
@@ -243,8 +231,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(withTitle: "\(online.count) 台设备在线", action: nil, keyEquivalent: "")
         menu.addItem(.separator())
         menu.addItem(withTitle: "设备与设置…", action: #selector(showWindow), keyEquivalent: ",")
-        menu.addItem(withTitle: legacyUI ? "切换到新版界面" : "切换到旧版界面",
-                     action: #selector(toggleUI), keyEquivalent: "")
         let bgItem = menu.addItem(withTitle: "后台读取剪贴板(全局)",
                                   action: #selector(toggleBackgroundReading), keyEquivalent: "")
         bgItem.state = backgroundReading ? .on : .off

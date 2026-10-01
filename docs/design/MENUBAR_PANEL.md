@@ -42,9 +42,29 @@ Right-clicking the menu-bar icon keeps the classic menu. The full window is now 
 - Copy is Chinese only, with no English tags. Drop "SCAN", "ONLINE", "IDLE", zero-padded counts, dot grids and cut corners.
 - Status is never shown by color alone: offline devices are also dimmed and say "离线" in the tooltip and accessibility label.
 
+## 设备与设置 window (macOS)
+
+A native grouped `Form` that follows the system's light/dark mode, with no Lime. It has these sections:
+- pending pairing / file requests;
+- 本机 (name, full fingerprint, address);
+- 已配对设备 (online state, 自动接收文件, remove with confirmation);
+- 附近的设备;
+- 剪贴板 (sync, background reading, notifications);
+- 收到的文件.
+
+## iOS
+
+A single dark screen following the B-iPhone mockup:
+- device avatars (tap to send a file, long-press for options) and the "+" pairing tile;
+- request cards;
+- transfers;
+- clipboard history (tap to copy);
+- received files (QuickLook);
+- a pinned "发送剪贴板" bar.
+
+The gear opens a settings sheet with the fingerprint, per-device 自动接收文件 toggles (swipe to remove) and the log.
+
 ## Not done yet
 
-- Redesign the "设备与设置" window in the same language (it still uses Signal Foundry).
-- iOS: a single screen following the B-iPhone mockup.
 - Android: the same layout in the existing plain-Java views.
 - Show the target device on the transfer line (transfer events don't carry the peer yet).

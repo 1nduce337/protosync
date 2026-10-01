@@ -12,39 +12,49 @@ struct ProtoSyncApp: App {
     }
 }
 
-/// Signal Foundry 单页指挥面板(对齐 Android 端布局,设计文档 §8/§9):
-/// System Header → 配对闸门 → 传输轨道 → 已连接设备 → 附近的设备 → 主操作 → 收件箱 → 活动流。
-/// 深浅双主题跟随系统(SP 调色板),点阵背景 + 45° 缺角面板。
+/// 单屏面板(设计方向 B 的 iPhone 版,见 docs/design/MENUBAR_PANEL.md):
+/// 设备头像 → 待决请求 → 传输 → 剪贴板历史 → 收到的文件;底部固定“发送剪贴板”。
+/// 固定深色外观,Lime 只用于主按钮、在线点与进度。
 struct RootView: View {
     @ObservedObject var model: IOSAppModel
-    @Environment(\.colorScheme) private var scheme
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var showFilePicker = false
     @State private var showPeerPicker = false
+    @State private var showSettings = false
+    @State private var showNearby = false
+    @State private var fileTarget: PeerConnection.PeerInfo?
     @State private var pickedURL: URL?
     @State private var previewURL: URL?
+    @State private var copiedID: UUID?
+
+    private static let canvas = Color(signal: 0x141416)
 
     var body: some View {
-        let P = SP.make(scheme)
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                header(P)
-                if let err = model.initError { initErrorCard(err, P) }
-                if let request = model.pairing { pairingGate(request, P) }
-                if let offer = model.fileOffers.first { fileOfferGate(offer, P) }
-                if !model.transfers.isEmpty { transferCard(P) }
-                if !model.peers.isEmpty { connectedCard(P) }
-                nearbyCard(P)
-                actions(P)
-                inboxCard(P)
-                activityCard(P)
+            VStack(alignment: .leading, spacing: 26) {
+                header
+                if let err = model.initError { errorCard(err) }
+                devices
+                if showNearby { nearby }
+                if let request = model.pairing { pairingCard(request) }
+                if let offer = model.fileOffers.first { offerCard(offer) }
+                if !model.transfers.isEmpty { transfers }
+                history
+                inbox
             }
-            .padding(16)
+            .padding(.horizontal, 20)
+            .padding(.top, 12)
+            .padding(.bottom, 24)
         }
-        .background(P.canvas.ignoresSafeArea())
-        .overlay(SignalUI.DotGrid().ignoresSafeArea())
-        .environment(\.sp, P)
+        .scrollIndicators(.hidden)
+        .background(Self.canvas.ignoresSafeArea())
+        .safeAreaInset(edge: .bottom) { actionBar }
+        .preferredColorScheme(.dark)
+        .tint(Panel.accent)
+        .animation(.easeInOut(duration: 0.2), value: showNearby)
+        .animation(.easeInOut(duration: 0.2), value: model.pairing?.id)
+        .animation(.easeInOut(duration: 0.2), value: model.fileOffers.first?.id)
         .onAppear {
             model.refresh()
             model.refreshNearby()
@@ -54,342 +64,385 @@ struct RootView: View {
             if phase == .active { model.refreshInbox() }
         }
         .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [.item], onCompletion: handlePickedFile)
-        .confirmationDialog("发送给哪台设备?", isPresented: $showPeerPicker, titleVisibility: .visible) {
+        .confirmationDialog("发送给哪台设备？", isPresented: $showPeerPicker, titleVisibility: .visible) {
             ForEach(model.peers, id: \.fingerprint) { peer in
                 Button(peer.name) { sendPickedFile(to: peer) }
             }
             Button("取消", role: .cancel) {}
         }
         .quickLookPreview($previewURL)
+        .sheet(isPresented: $showSettings) { IOSSettingsSheet(model: model) }
     }
 
-    // MARK: - System Header(logo + 大数字在线数 + SCAN)
+    // MARK: - 标题行
 
-    private func header(_ P: SP) -> some View {
-        HStack(alignment: .center, spacing: 10) {
-            Image(scheme == .dark ? "protosync-logo-dark" : "protosync-logo-light")
-                .resizable().frame(width: 30, height: 30)
+    private var header: some View {
+        HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text("ProtoSync").font(.system(size: 16, weight: .bold)).foregroundStyle(P.text)
-                Text(model.ready ? "\(model.statusText) · 指纹 \(model.fingerprint)" : model.statusText)
-                    .font(.system(size: 10).monospaced())
-                    .foregroundStyle(P.textDim)
-                    .lineLimit(model.initError == nil ? 1 : 3)
+                Text("ProtoSync").font(.system(size: 17, weight: .semibold))
+                if !model.ready {
+                    Text(model.statusText).font(.system(size: 12)).foregroundStyle(.secondary)
+                }
             }
-            Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 0) {
-                Text(String(format: "%02d", model.peers.count))
-                    .font(.system(size: 36, weight: .medium).monospacedDigit())
-                    .foregroundStyle(P.text)
-                Text("台在线 // ONLINE")
-                    .font(.system(size: 9, weight: .semibold).monospaced())
-                    .kerning(0.8)
-                    .foregroundStyle(P.textDim)
-            }
+            Spacer()
             Button {
-                model.scan()
+                showSettings = true
             } label: {
-                Text(model.isScanning ? "SCAN…" : "SCAN")
-                    .font(.system(size: 11, weight: .semibold).monospaced())
-                    .foregroundStyle(P.text)
+                Image(systemName: "gearshape")
+                    .font(.system(size: 19))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44, height: 44, alignment: .trailing)
             }
-            .buttonStyle(ScanButtonStyle(P: P))
-            .disabled(model.isScanning)
+            .accessibilityLabel("设置")
+            .disabled(!model.ready)
         }
-        .padding(.horizontal, 14).padding(.vertical, 12)
-        .background(SignalUI.NotchCorner().fill(P.headerBg))
-        .overlay(SignalUI.NotchCorner().stroke(P.panelStroke, lineWidth: 1))
     }
 
-    // MARK: - 初始化错误(完整展示 + 一键复制,便于回传诊断)
-
-    private func initErrorCard(_ err: String, _ P: SP) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            SignalUI.SectionHeader(zh: "初始化失败", en: "ERROR", P: P)
-                .foregroundStyle(P.coralText)
+    private func errorCard(_ err: String) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("初始化失败")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(Color(signal: 0xFF6B66))
             Text(err)
-                .font(.system(size: 10).monospaced())
-                .foregroundStyle(P.text)
+                .font(.system(size: 11).monospaced())
                 .textSelection(.enabled)
-            Button {
-                UIPasteboard.general.string = err
-            } label: {
-                Text("复制错误信息").font(.system(size: 12, weight: .semibold))
-            }
-            .buttonStyle(OutlinedButtonStyle(P: P))
+            Button("复制错误信息") { UIPasteboard.general.string = err }
+                .buttonStyle(PanelButtonStyle(height: 44, fontSize: 15))
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 6).fill(P.panel))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(P.coralText.opacity(0.55), lineWidth: 1))
+        .padding(16)
+        .background(Panel.fill, in: RoundedRectangle(cornerRadius: 16))
     }
 
-    // MARK: - 配对闸门(Amber,安全决策不是 Toast;§9.3)
+    // MARK: - 设备头像
 
-    private func pairingGate(_ request: IOSAppModel.PairingRequest, _ P: SP) -> some View {
+    private var devices: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SignalUI.SectionHeader(zh: "配对请求", en: "PAIRING", P: P)
-                .foregroundStyle(P.amberText)
-            Text("设备「\(request.info.name)」请求配对")
-                .font(.system(size: 14, weight: .medium)).foregroundStyle(P.text)
-            Text(String(request.info.fingerprint.prefix(16)))
-                .font(.system(size: 22, weight: .medium).monospacedDigit())
-                .foregroundStyle(P.amberText)
-            Text("核对两台设备显示的指纹一致后再接受")
-                .font(.system(size: 11)).foregroundStyle(P.textDim)
-            HStack(spacing: 10) {
-                Button {
-                    model.pairAccepted(request, true)
-                } label: {
-                    Text("接受").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(AccentButtonStyle(P: P, fill: P.amberText))
-                Button {
-                    model.pairAccepted(request, false)
-                } label: {
-                    Text("拒绝").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(OutlinedButtonStyle(P: P))
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 3), spacing: 18) {
+                ForEach(model.pairedRows) { row in avatar(row) }
+                pairTile
+            }
+            if model.paired.isEmpty && model.ready {
+                Text("还没有配对的设备。点 + 查找附近的设备。")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 6).fill(P.panel))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(P.amberText.opacity(0.55), lineWidth: 1))
     }
 
-    // MARK: - 文件请求闸门(Cyan:入站数据,需要决定)
-
-    private func fileOfferGate(_ prompt: IOSAppModel.FileOfferPrompt, _ P: SP) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SignalUI.SectionHeader(zh: "文件请求", en: "INCOMING", P: P)
-                .foregroundStyle(P.cyanText)
-            Text("「\(prompt.offer.from.name)」想发送文件")
-                .font(.system(size: 14, weight: .medium)).foregroundStyle(P.text)
-            Text("\(prompt.offer.name) · \(ByteCountFormatter.string(fromByteCount: prompt.offer.size, countStyle: .file))")
-                .font(.system(size: 12)).foregroundStyle(P.textDim)
-                .lineLimit(1).truncationMode(.middle)
-            HStack(spacing: 10) {
-                Button {
-                    model.decideFileOffer(prompt, accept: true)
-                } label: {
-                    Text("接收").frame(maxWidth: .infinity)
+    private func avatar(_ row: DeviceRow) -> some View {
+        Button {
+            guard let peer = model.peer(for: row.fingerprint) else { return }
+            fileTarget = peer
+            showFilePicker = true
+        } label: {
+            VStack(spacing: 8) {
+                ZStack(alignment: .bottomTrailing) {
+                    Circle()
+                        .fill(row.online ? Panel.fillStrong : Panel.fill)
+                        .overlay(Image(systemName: Panel.glyph(for: row.name))
+                            .font(.system(size: 26))
+                            .foregroundStyle(row.online ? Color.primary : Color.secondary.opacity(0.6)))
+                        .frame(width: 76, height: 76)
+                    if row.online {
+                        Circle()
+                            .fill(Panel.accent)
+                            .frame(width: 13, height: 13)
+                            .overlay(Circle().strokeBorder(Self.canvas, lineWidth: 2.5))
+                            .offset(x: -4, y: -4)
+                    }
                 }
-                .buttonStyle(AccentButtonStyle(P: P, fill: P.cyanText))
-                Button {
-                    model.decideFileOffer(prompt, accept: false)
-                } label: {
-                    Text("拒绝").frame(maxWidth: .infinity)
-                }
-                .buttonStyle(OutlinedButtonStyle(P: P))
+                Text(row.name)
+                    .font(.system(size: 13))
+                    .lineLimit(1)
+                    .foregroundStyle(row.online ? Color.primary : Color.secondary)
+                Text(row.online ? (row.filesTrusted ? "在线" : "在线 · 文件需确认") : "离线")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .padding(.top, -4)
             }
-            Button {
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            if row.online, let peer = model.peer(for: row.fingerprint) {
+                Button("发送文件…", systemImage: "doc") {
+                    fileTarget = peer
+                    showFilePicker = true
+                }
+            }
+            Toggle("自动接收文件", isOn: Binding(
+                get: { row.filesTrusted },
+                set: { model.setFileTrust(.init(fingerprint: row.fingerprint, name: row.name), trusted: $0) }))
+            Button("移除此设备", systemImage: "trash", role: .destructive) { model.removePaired(row) }
+        }
+        .accessibilityLabel("\(row.name)，\(row.online ? "在线，点按发送文件" : "离线")")
+    }
+
+    private var pairTile: some View {
+        Button {
+            showNearby.toggle()
+            if showNearby { model.scan() }
+        } label: {
+            VStack(spacing: 8) {
+                Circle()
+                    .strokeBorder(style: StrokeStyle(lineWidth: 1.5, dash: [5, 4]))
+                    .foregroundStyle(showNearby ? Panel.accent : Color.secondary)
+                    .overlay(Image(systemName: showNearby ? "xmark" : "plus")
+                        .font(.system(size: 22, weight: .medium))
+                        .foregroundStyle(.secondary))
+                    .frame(width: 76, height: 76)
+                Text("配对").font(.system(size: 13)).foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!model.ready)
+        .accessibilityLabel(showNearby ? "收起附近的设备" : "配对新设备")
+    }
+
+    private var nearby: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionTitle("附近的设备")
+            if model.nearby.isEmpty {
+                Text(model.isScanning ? "正在查找…" : "没有发现新设备。确认对方已打开 ProtoSync 且在同一网络。")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(model.nearby, id: \.self) { shortFp in
+                HStack {
+                    Text("设备 \(shortFp)").font(.system(size: 15).monospacedDigit())
+                    Spacer()
+                    Button("配对") { model.pairWith(shortFp: shortFp) }
+                        .buttonStyle(PanelButtonStyle(height: 36, fontSize: 14))
+                        .frame(width: 76)
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+                .background(Panel.fill, in: RoundedRectangle(cornerRadius: 14))
+            }
+        }
+    }
+
+    // MARK: - 配对请求 / 文件请求
+
+    private func pairingCard(_ request: IOSAppModel.PairingRequest) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("「\(request.info.name)」请求配对").font(.system(size: 15, weight: .semibold))
+            Text(shortFPText(request.info.fingerprint))
+                .font(.system(size: 28, weight: .medium).monospacedDigit())
+            Text("确认对方屏幕上显示同一指纹后再接受。")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+            HStack(spacing: 10) {
+                Button("接受") { model.pairAccepted(request, true) }
+                    .buttonStyle(PanelButtonStyle(prominent: true, height: 44, fontSize: 15))
+                Button("拒绝") { model.pairAccepted(request, false) }
+                    .buttonStyle(PanelButtonStyle(height: 44, fontSize: 15))
+            }
+        }
+        .padding(16)
+        .background(Panel.fill, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private func offerCard(_ prompt: IOSAppModel.FileOfferPrompt) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            (Text(prompt.offer.from.name).fontWeight(.semibold) + Text(" 想发送「\(prompt.offer.name)」"))
+                .font(.system(size: 15))
+                .lineLimit(2)
+                .truncationMode(.middle)
+            Text(ByteCountFormatter.string(fromByteCount: prompt.offer.size, countStyle: .file))
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .padding(.top, -6)
+            HStack(spacing: 10) {
+                Button("接收") { model.decideFileOffer(prompt, accept: true) }
+                    .buttonStyle(PanelButtonStyle(prominent: true, height: 44, fontSize: 15))
+                Button("拒绝") { model.decideFileOffer(prompt, accept: false) }
+                    .buttonStyle(PanelButtonStyle(height: 44, fontSize: 15))
+            }
+            Button("接收，并始终信任此设备的文件") {
                 model.decideFileOffer(prompt, accept: true, alwaysTrust: true)
-            } label: {
-                Text("接收,并始终信任此设备的文件")
-                    .font(.system(size: 12))
-                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.plain)
-            .foregroundStyle(P.cyanText)
+            .font(.system(size: 13))
+            .foregroundStyle(Panel.accent)
+            .frame(maxWidth: .infinity, minHeight: 32)
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 6).fill(P.panel))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(P.cyanText.opacity(0.55), lineWidth: 1))
+        .padding(16)
+        .background(Panel.fill, in: RoundedRectangle(cornerRadius: 16))
     }
 
-    // MARK: - 传输轨道(Cyan 进行 / Lime 完成;§9.4)
+    // MARK: - 传输
 
-    private func transferCard(_ P: SP) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SignalUI.SectionHeader(zh: "传输任务", en: "TRANSFER", P: P)
+    private var transfers: some View {
+        VStack(alignment: .leading, spacing: 12) {
             ForEach(model.transfers) { t in
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack {
-                        Text(t.incoming ? "↓" : "↑")
-                            .font(.system(size: 13, weight: .bold))
-                            .foregroundStyle(t.incoming ? P.cyanText : P.limeText)
-                        Text(t.name).font(.system(size: 13)).foregroundStyle(P.text).lineLimit(1)
-                            .truncationMode(.middle)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Image(systemName: t.incoming ? "arrow.down" : "arrow.up")
+                            .font(.system(size: 11, weight: .bold))
+                            .foregroundStyle(.secondary)
+                        Text(t.name).font(.system(size: 14)).lineLimit(1).truncationMode(.middle)
                         Spacer()
                         Text("\(Int(t.fraction * 100))%")
                             .font(.system(size: 13).monospacedDigit())
-                            .foregroundStyle(t.incoming ? P.cyanText : P.limeText)
+                            .foregroundStyle(.secondary)
                     }
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule().fill(P.divider)
-                            Capsule().fill(t.incoming ? P.cyanFill : P.limeFill)
-                                .frame(width: max(4, geo.size.width * t.fraction))
+                    ProgressBar(fraction: t.fraction, fill: Panel.accent, height: 3)
+                }
+            }
+        }
+    }
+
+    // MARK: - 剪贴板历史
+
+    private var history: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline) {
+                sectionTitle("剪贴板历史")
+                Spacer()
+                if !model.clipHistory.isEmpty {
+                    Text("点按即复制").font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+            }
+            if model.clipHistory.isEmpty {
+                Text("收到或发出的剪贴板会出现在这里。")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(model.clipHistory) { item in
+                Button {
+                    model.copyFromHistory(item)
+                    copiedID = item.id
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                        if copiedID == item.id { copiedID = nil }
+                    }
+                } label: {
+                    HStack(spacing: 12) {
+                        if case .image(let png) = item.content, let image = UIImage(data: png) {
+                            Image(uiImage: image)
+                                .resizable()
+                                .aspectRatio(contentMode: .fill)
+                                .frame(width: 36, height: 36)
+                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(preview(item)).font(.system(size: 15)).lineLimit(1)
+                            Text("\(item.source) · \(item.time.formatted(date: .omitted, time: .shortened))")
+                                .font(.system(size: 12))
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 8)
+                        if copiedID == item.id {
+                            Text("已复制").font(.system(size: 13)).foregroundStyle(Panel.accent)
                         }
                     }
-                    .frame(height: 3)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Panel.fill, in: RoundedRectangle(cornerRadius: 14))
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("复制：\(preview(item))")
             }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 6).fill(P.panel))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(P.panelStroke, lineWidth: 1))
-    }
-
-    // MARK: - 已连接设备
-
-    private func connectedCard(_ P: SP) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SignalUI.SectionHeader(zh: "已连接设备", en: "CONNECTED", P: P)
-            ForEach(model.peers, id: \.fingerprint) { peer in
-                HStack(spacing: 10) {
-                    Circle().fill(P.nodeOnline).frame(width: 8, height: 8)
-                    Text(peer.name).font(.system(size: 14)).foregroundStyle(P.text)
-                    Spacer()
-                    Text(String(peer.fingerprint.prefix(8)))
-                        .font(.system(size: 11).monospaced())
-                        .foregroundStyle(P.textDim)
-                    Menu {
-                        Toggle("自动接收文件", isOn: Binding(
-                            get: { !model.filesNeedApproval.contains(peer.fingerprint) },
-                            set: { model.setFileTrust(peer, trusted: $0) }))
-                    } label: {
-                        Image(systemName: model.filesNeedApproval.contains(peer.fingerprint)
-                              ? "tray.and.arrow.down" : "tray.and.arrow.down.fill")
-                            .font(.system(size: 13))
-                            .foregroundStyle(P.textDim)
-                            .frame(width: 28, height: 28)
-                    }
-                    .accessibilityLabel("文件接收设置")
-                }
-            }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 6).fill(P.panel))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(P.panelStroke, lineWidth: 1))
-    }
-
-    // MARK: - 附近的设备(未配对;点按发起配对)
-
-    private func nearbyCard(_ P: SP) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SignalUI.SectionHeader(zh: "附近的设备", en: "NEARBY", P: P)
-            if model.nearby.isEmpty {
-                Text("  暂无,点 SCAN 刷新;发现新设备后会出现在这里")
-                    .font(.system(size: 12)).foregroundStyle(P.textDim)
-            }
-            ForEach(model.nearby, id: \.self) { shortFp in
-                HStack(spacing: 10) {
-                    Circle().strokeBorder(P.textDim, lineWidth: 1.5).frame(width: 8, height: 8)
-                    Text("设备 \(shortFp)")
-                        .font(.system(size: 13).monospaced())
-                        .foregroundStyle(P.text)
-                    Spacer()
-                    Button {
-                        model.pairWith(shortFp: shortFp)
-                    } label: {
-                        Text("配对").font(.system(size: 12, weight: .semibold))
-                            .padding(.horizontal, 14).padding(.vertical, 6)
-                    }
-                    .buttonStyle(OutlinedButtonStyle(P: P))
-                }
-            }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 6).fill(P.panel))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(P.panelStroke, lineWidth: 1))
-    }
-
-    // MARK: - 主操作(Lime 主按钮 + Ink 深字;§5.3)
-
-    private func actions(_ P: SP) -> some View {
-        HStack(spacing: 10) {
-            Button {
-                model.sendClipboard()
-            } label: {
-                Text("发送剪贴板").frame(maxWidth: .infinity).frame(height: 26)
-            }
-            .buttonStyle(AccentButtonStyle(P: P, fill: P.limeFill))
-            .disabled(!model.ready)
-
-            Button {
-                showFilePicker = true
-            } label: {
-                Text("发送文件").frame(maxWidth: .infinity).frame(height: 26)
-            }
-            .buttonStyle(OutlinedButtonStyle(P: P))
-            .disabled(!model.ready || model.peers.isEmpty)
         }
     }
 
-    // MARK: - 收件箱
+    private func preview(_ item: IOSAppModel.ClipItem) -> String {
+        switch item.content {
+        case .text(let text):
+            return text.replacingOccurrences(of: "\n", with: " ")
+        case .image(let png):
+            guard let image = UIImage(data: png) else { return "图片" }
+            return "图片 · \(Int(image.size.width * image.scale))×\(Int(image.size.height * image.scale))"
+        }
+    }
 
-    private func inboxCard(_ P: SP) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            SignalUI.SectionHeader(zh: "收件箱", en: "INBOX", P: P)
-            Text("文件 App → 我的 iPhone → ProtoSync → Received，可查看或删除")
-                .font(.system(size: 11)).foregroundStyle(P.textDim)
+    // MARK: - 收到的文件
+
+    private var inbox: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            sectionTitle("收到的文件")
             if model.inbox.isEmpty {
-                Text("  暂无文件,收到的文件保存在本机收件箱")
-                    .font(.system(size: 12)).foregroundStyle(P.textDim)
+                Text("收到的文件会保存在这里，也可以在“文件”App › 我的 iPhone › ProtoSync 中管理。")
+                    .font(.system(size: 13))
+                    .foregroundStyle(.secondary)
             }
-            ForEach(model.inbox, id: \.absoluteString) { url in
+            ForEach(model.inbox.prefix(5), id: \.absoluteString) { url in
                 Button {
                     previewURL = url
                 } label: {
-                    HStack(spacing: 8) {
+                    HStack(spacing: 10) {
                         Image(systemName: "doc")
-                            .font(.system(size: 12))
-                            .foregroundStyle(P.cyanText)
+                            .font(.system(size: 15))
+                            .foregroundStyle(.secondary)
                         Text(url.lastPathComponent)
-                            .font(.system(size: 13)).foregroundStyle(P.text)
-                            .lineLimit(1).truncationMode(.middle)
+                            .font(.system(size: 15))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
                         Spacer()
-                        if let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) {
+                        if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize {
                             Text(ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file))
-                                .font(.system(size: 10).monospaced())
-                                .foregroundStyle(P.textDim)
+                                .font(.system(size: 12).monospacedDigit())
+                                .foregroundStyle(.secondary)
                         }
                     }
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: 44)
+                    .background(Panel.fill, in: RoundedRectangle(cornerRadius: 14))
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
             }
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 6).fill(P.panel))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(P.panelStroke, lineWidth: 1))
     }
 
-    // MARK: - 活动流(方向/类型/摘要/结果;§9.5)
+    // MARK: - 底部操作栏
 
-    private func activityCard(_ P: SP) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            SignalUI.SectionHeader(zh: "流转记录", en: "ACTIVITY", P: P)
-            if model.events.isEmpty {
-                Text("  暂无流转记录").font(.system(size: 12)).foregroundStyle(P.textDim)
+    private var actionBar: some View {
+        HStack(spacing: 10) {
+            Button("发送剪贴板") { model.sendClipboard() }
+                .buttonStyle(PanelButtonStyle(prominent: true, height: 54, fontSize: 17))
+                .disabled(!model.ready)
+            Button {
+                fileTarget = nil
+                showFilePicker = true
+            } label: {
+                Image(systemName: "doc")
+                    .font(.system(size: 20))
+                    .foregroundStyle(Color.primary)
+                    .frame(width: 54, height: 54)
+                    .background(Panel.fillStrong, in: RoundedRectangle(cornerRadius: 12))
             }
-            ForEach(model.events) { event in
-                Text(event.line)
-                    .font(.system(size: 12))
-                    .foregroundStyle(event.line.hasPrefix("文件失败") ? P.coralText : P.text)
-                    .lineLimit(2)
-            }
+            .buttonStyle(.plain)
+            .disabled(!model.ready || model.peers.isEmpty)
+            .accessibilityLabel("发送文件")
         }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 6).fill(P.panel))
-        .overlay(RoundedRectangle(cornerRadius: 6).stroke(P.panelStroke, lineWidth: 1))
+        .padding(.horizontal, 20)
+        .padding(.top, 10)
+        .padding(.bottom, 6)
+        .background(Self.canvas.opacity(0.96).ignoresSafeArea(edges: .bottom))
+    }
+
+    private func sectionTitle(_ text: String) -> some View {
+        Text(text).font(.system(size: 13)).foregroundStyle(.secondary)
     }
 
     // MARK: - 文件选择
 
     private func handlePickedFile(_ result: Result<URL, Error>) {
-        guard case .success(let url) = result else { return }
+        guard case .success(let url) = result else { fileTarget = nil; return }
         pickedURL = url
-        if model.peers.count == 1 {
+        if let target = fileTarget {
+            fileTarget = nil
+            sendPickedFile(to: target)
+        } else if model.peers.count == 1 {
             sendPickedFile(to: model.peers[0])
         } else if model.peers.isEmpty {
-            model.events.insert(IOSAppModel.Event(line: "没有在线设备,发送取消"), at: 0)
+            model.events.insert(IOSAppModel.Event(line: "没有在线设备，发送取消"), at: 0)
         } else {
             showPeerPicker = true
         }
@@ -401,42 +454,80 @@ struct RootView: View {
     }
 }
 
-// MARK: - 按钮样式(4-8px 圆角、1px 边线、无大面积阴影;§7.1)
+// MARK: - 设置
 
-private struct AccentButtonStyle: ButtonStyle {
-    let P: SP
-    let fill: Color
+struct IOSSettingsSheet: View {
+    @ObservedObject var model: IOSAppModel
+    @Environment(\.dismiss) private var dismiss
 
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 14, weight: .semibold))
-            .foregroundStyle(P.onAccentText)
-            .padding(.vertical, 8)
-            .background(RoundedRectangle(cornerRadius: 6).fill(fill.opacity(configuration.isPressed ? 0.75 : 1)))
-            .opacity(configuration.isPressed ? 0.85 : 1)
-    }
-}
+    var body: some View {
+        NavigationStack {
+            Form {
+                if model.ready {
+                    Section {
+                        LabeledContent("设备名", value: model.store.identity.name)
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("指纹")
+                            Text(groupedFPText(model.store.identity.fingerprint))
+                                .font(.system(size: 12).monospaced())
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        LabeledContent("端口", value: "\(model.port)")
+                    } header: {
+                        Text("本机")
+                    } footer: {
+                        Text("设备名跟随 iPhone 名称（设置 › 通用 › 关于本机 › 名称）。配对时双方核对指纹前 8 位。")
+                    }
+                }
 
-private struct OutlinedButtonStyle: ButtonStyle {
-    let P: SP
+                Section {
+                    if model.pairedRows.isEmpty {
+                        Text("还没有配对的设备").foregroundStyle(.secondary)
+                    }
+                    ForEach(model.pairedRows) { row in
+                        Toggle(isOn: Binding(
+                            get: { row.filesTrusted },
+                            set: { model.setFileTrust(.init(fingerprint: row.fingerprint, name: row.name), trusted: $0) })
+                        ) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(row.name)
+                                Text("\(row.online ? "在线" : "离线") · \(shortFPText(row.fingerprint))")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .onDelete { offsets in
+                        let rows = model.pairedRows
+                        offsets.map { rows[$0] }.forEach { model.removePaired($0) }
+                    }
+                } header: {
+                    Text("已配对设备 · 自动接收文件")
+                } footer: {
+                    Text("关闭开关后，这台设备发来的每个文件都需要你确认。左滑可移除设备。")
+                }
 
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 14))
-            .foregroundStyle(P.text)
-            .padding(.vertical, 8)
-            .background(RoundedRectangle(cornerRadius: 6).fill(P.panel.opacity(configuration.isPressed ? 0.6 : 1)))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(P.panelStroke, lineWidth: 1))
-    }
-}
-
-private struct ScanButtonStyle: ButtonStyle {
-    let P: SP
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            .background(RoundedRectangle(cornerRadius: 6).fill(P.panel))
-            .overlay(RoundedRectangle(cornerRadius: 6).stroke(P.panelStroke, lineWidth: 1))
+                Section("日志") {
+                    if model.events.isEmpty {
+                        Text("暂无记录").foregroundStyle(.secondary)
+                    }
+                    ForEach(model.events) { event in
+                        Text(event.line)
+                            .font(.system(size: 13))
+                            .foregroundStyle(event.line.hasPrefix("文件失败") ? Color(signal: 0xFF6B66) : Color.primary)
+                    }
+                }
+            }
+            .navigationTitle("设置")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("完成") { dismiss() }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+        .tint(Panel.accent)
     }
 }

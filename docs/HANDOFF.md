@@ -22,7 +22,25 @@ Design direction B was chosen (spec: `docs/design/MENUBAR_PANEL.md`).
   3. clicking a history item copies it again;
   4. the "同步剪贴板" switch stops sending;
   5. pairing and file-request cards show up in the panel.
-- **Next after that:** restyle the 设备与设置 window, then the iOS screen (B-iPhone mockup), then Android.
+- ✅ The user checked the panel by hand; it renders as designed.
+
+### Round 2 (cloud, not compiled yet)
+
+- **Panel polish:**
+  - Android devices get a modern phone icon (`smartphone`, falls back to `iphone` before macOS 14) instead of the keypad phone;
+  - panel copy uses full-width punctuation.
+- **New 设备与设置 window** (`SettingsView.swift`): native grouped `Form`; see the spec. The old `SignalFoundryView.swift` and `DashboardView.swift` are deleted, along with the "切换到旧版界面" menu item.
+- **Shared code:**
+  - shared helpers moved to `SharedUI.swift` (macOS only) and `PanelStyle.swift` (macOS + iOS, added to `ios/project.yml`);
+  - renames: `SignalDeviceRow` → `DeviceRow`, `signalFPText` → `shortFPText`.
+- **Background reading:** the settings window flips it through `@AppStorage`; `AppDelegate` now watches `UserDefaults` and `updateNapActivity()` became idempotent.
+- **iOS redesigned** (`ios/ProtoSync/App.swift`, model additions in `Model.swift`): see the spec.
+  - "发送剪贴板" now also sends images.
+- **Next on the Mac:**
+  1. Run `swift build`, `swift run protosync-tests` and `./scripts/make-app.sh`.
+  2. Regenerate the iOS project (`cd ios && xcodegen generate`, because a file was added) and build it.
+  3. Check the settings window and the iOS screen by hand.
+- **Then:** Android migration to the same design.
 
 ## Folder reorganisation (merged into `main`)
 

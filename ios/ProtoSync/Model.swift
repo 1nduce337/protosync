@@ -80,6 +80,36 @@ final class IOSAppModel: ObservableObject, @preconcurrency SyncEngine.Delegate {
     @Published var fileOffers: [FileOfferPrompt] = []
     /// 已关闭“自动接收文件”的已配对设备指纹
     @Published var filesNeedApproval: Set<String> = []
+    /// 已配对设备(头像网格的数据源)
+    @Published var paired: [IdentityStore.PairedDevice] = []
+    /// 剪贴板历史:只在内存里,不落盘
+    @Published var clipHistory: [ClipItem] = []
+
+    struct ClipItem: Identifiable {
+        enum Content {
+            case text(String)
+            case image(Data)
+        }
+        let id = UUID()
+        let content: Content
+        let source: String      // 来源设备名;本机发出为 ClipItem.localSource
+        let time: Date
+
+        static let localSource = "这台设备"
+    }
+
+    static let clipHistoryLimit = 6
+
+    /// 头像网格:已配对设备,在线优先
+    var pairedRows: [DeviceRow] {
+        let rows = paired.map { d -> DeviceRow in
+            let live = peers.first { $0.fingerprint == d.fingerprint }
+            return DeviceRow(id: d.fingerprint, name: live?.name ?? d.name,
+                             fingerprint: d.fingerprint, online: live != nil,
+                             filesTrusted: d.filesTrusted)
+        }
+        return rows.filter { $0.online } + rows.filter { !$0.online }
+    }
     @Published var events: [Event] = []
     @Published var receivedImage: Data?
     @Published var transfers: [TransferRow] = []
@@ -150,8 +180,36 @@ final class IOSAppModel: ObservableObject, @preconcurrency SyncEngine.Delegate {
     func refresh() {
         guard ready else { return }
         peers = engine.onlinePeers()
-        let untrusted = Set(store.pairedDevices.filter { !$0.filesTrusted }.map(\.fingerprint))
+        let latestPaired = store.pairedDevices
+        if latestPaired != paired { paired = latestPaired }
+        let untrusted = Set(latestPaired.filter { !$0.filesTrusted }.map(\.fingerprint))
         if untrusted != filesNeedApproval { filesNeedApproval = untrusted }
+    }
+
+    func recordClip(_ content: ClipItem.Content, source: String) {
+        clipHistory.insert(ClipItem(content: content, source: source, time: Date()), at: 0)
+        if clipHistory.count > Self.clipHistoryLimit {
+            clipHistory.removeLast(clipHistory.count - Self.clipHistoryLimit)
+        }
+    }
+
+    /// 写回系统剪贴板(iOS 不自动外发,只有点“发送剪贴板”才同步)
+    func copyFromHistory(_ item: ClipItem) {
+        switch item.content {
+        case .text(let text): UIPasteboard.general.string = text
+        case .image(let png): UIPasteboard.general.image = UIImage(data: png)
+        }
+    }
+
+    func removePaired(_ row: DeviceRow) {
+        guard ready else { return }
+        engine.removePairedDevice(fingerprint: row.fingerprint)
+        refresh()
+        log("已移除 \(row.name)")
+    }
+
+    func peer(for fingerprint: String) -> PeerConnection.PeerInfo? {
+        peers.first { $0.fingerprint == fingerprint }
     }
 
     func setFileTrust(_ peer: PeerConnection.PeerInfo, trusted: Bool) {
@@ -201,9 +259,19 @@ final class IOSAppModel: ObservableObject, @preconcurrency SyncEngine.Delegate {
     }
 
     func sendClipboard() {
-        guard ready, let text = UIPasteboard.general.string, !text.isEmpty else { return }
-        engine.broadcastClipboardText(text)
-        events.insert(Event(line: "↑ 已发送剪贴板(\(text.count) 字)"), at: 0)
+        guard ready else { return }
+        let pasteboard = UIPasteboard.general
+        if let text = pasteboard.string, !text.isEmpty {
+            engine.broadcastClipboardText(text)
+            recordClip(.text(text), source: ClipItem.localSource)
+            log("↑ 已发送剪贴板(\(text.count) 字)")
+        } else if let image = pasteboard.image, let png = image.pngData() {
+            engine.broadcastClipboardImage(png: png)
+            recordClip(.image(png), source: ClipItem.localSource)
+            log("↑ 已发送图片(\(png.count / 1024) KB)")
+        } else {
+            log("剪贴板是空的")
+        }
     }
 
     var inboxDirectory: URL? {
@@ -282,12 +350,14 @@ final class IOSAppModel: ObservableObject, @preconcurrency SyncEngine.Delegate {
 
     func engine(_ engine: SyncEngine, didReceiveClipboardText text: String, from peer: PeerConnection.PeerInfo) {
         UIPasteboard.general.string = text
+        recordClip(.text(text), source: peer.name)
         log("↓ 收到文本(\(text.count) 字)已进剪贴板")
     }
 
     func engine(_ engine: SyncEngine, didReceiveClipboardImage png: Data, from peer: PeerConnection.PeerInfo) {
         UIPasteboard.general.image = UIImage(data: png)
         receivedImage = png
+        recordClip(.image(png), source: peer.name)
         log("↓ 收到图片(\(png.count / 1024) KB)已进剪贴板")
     }
 

@@ -17,7 +17,7 @@ private data** — see "Privacy" below.
 | Path | What |
 |---|---|
 | `Sources/Core/` | Swift protocol stack, platform-independent (used by macOS and iOS) |
-| `Sources/ProtoSyncApp/` | macOS menu-bar app (SwiftUI). `SignalFoundryView` is the live UI; `DashboardView` is the legacy UI |
+| `Sources/ProtoSyncApp/` | macOS menu-bar app (SwiftUI). `MenuBarPanel` = the popover (main UI); `SettingsView` = the 设备与设置 window; `PanelStyle` = shared tokens (also compiled by iOS) |
 | `Sources/protosync-peer/` | CLI test peer |
 | `Sources/protosync-tests/` | Test runner (plain executable — no XCTest in a Command Line Tools setup) |
 | `ios/` | iOS app (xcodegen project + SwiftUI), reuses `Core` |
@@ -85,12 +85,15 @@ Swift (`Sources/Core`) and Java (`android/src/com/protosync/core`) implement the
 ## Conventions
 
 - Code comments and UI strings are in Chinese. Match the surrounding style and comment density.
-- New UI follows the menu-bar panel design (`docs/design/MENUBAR_PANEL.md`): one Lime accent, fills instead of outlines, system font, Chinese-only copy. Screens not yet migrated still use Signal Foundry (`docs/design/PROTO_SYNC_VISUAL_DIRECTION.md`):
-  - Amber = security decision
-  - Cyan = incoming data
-  - Lime = success
-  - Coral = error
-- `Sources/ProtoSyncApp/SignalTheme.swift` is the one theme file for macOS **and** iOS (`ios/project.yml` compiles it directly). Don't copy it into `ios/`.
+- UI follows the panel design (`docs/design/MENUBAR_PANEL.md`):
+  - one Lime accent;
+  - fills instead of outlines;
+  - system font;
+  - Chinese-only copy with full-width punctuation;
+  - no console-style English tags.
+- The macOS settings window uses native `Form` controls instead, and no Lime.
+- Android still uses the legacy Signal Foundry look (`docs/design/PROTO_SYNC_VISUAL_DIRECTION.md`) until it is migrated.
+- `Sources/ProtoSyncApp/PanelStyle.swift` and `SignalTheme.swift` are shared by macOS **and** iOS (`ios/project.yml` compiles them directly). Don't copy them into `ios/`.
 - Android stays plain Java with no Gradle (Java 8 source level).
 
 ## Privacy
