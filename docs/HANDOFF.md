@@ -139,7 +139,7 @@ The user reported two bugs:
   - the Finder / Dock icon and the menu-bar template icon on screen (screen capture was not permitted, so the agent could not look);
   - `killall Finder` was not run; do it (or `touch ProtoSync.app`) if Finder shows the old icon.
 
-### Round 8 (cloud): README rewrite and the 0.0.1 release prep (macOS + Android)
+### Round 8 (blocked on the Mac: screenshots missing, no gh): README rewrite and the 0.0.1 release prep (macOS + Android)
 
 - **README** rewritten for the new design:
   - download table and the macOS first-launch (Gatekeeper) note;
@@ -156,6 +156,9 @@ The user reported two bugs:
   - `dist/` is gitignored.
 - **CLAUDE.md** gains a "Releases" section.
 - ⚠️ **Not run:** the packaging script (macOS-only tools). There is no GitHub release tool in the cloud session, so tagging and publishing happen on the Mac.
+- 🛑 **Blocked on the Mac (nothing merged, packaged, tagged or released):**
+  - `docs/img/` holds only the old `ios-simulator.png`; the four README screenshots (`macos-panel.png`, `macos-settings.png`, `android-main.png`, `pairing.png`) are not in the repo or in Desktop/Downloads, so there was nothing to privacy-check;
+  - `gh` is not installed on this Mac, so the pre-release cannot be created from the command line (install it and run `gh auth login`, or create the release in the GitHub web UI).
 - **Next on the Mac:**
   1. Add the four screenshots. Before committing them, crop or blur IP addresses and personal device names (see "Privacy" in `CLAUDE.md`).
   2. Merge `feat/menubar-popover-ui` into `main`.
