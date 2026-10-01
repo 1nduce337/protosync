@@ -86,7 +86,7 @@ DEVICE NODE  →  VERIFIED ROUTE  →  DEVICE NODE
 
 当前概念稿位于：
 
-`design/assets/protosync-logo-concept-v1.png`
+`docs/design/assets/protosync-logo-concept-v1.png`
 
 构成含义：
 
@@ -454,7 +454,7 @@ Android 注意：
 
 ### Phase 1：设计沙盒
 
-优先在 `ProtoSyncUIDemo/` 迭代视觉，不触碰传输层：
+优先在 `tools/ProtoSyncUIDemo/` 迭代视觉，不触碰传输层：
 
 1. 建立 SwiftUI Design Tokens。
 2. 先实现 System Header、Device Node、Pairing Gate、Transfer Track。
@@ -578,8 +578,8 @@ Constraints: original design only; genuinely transparent background; no text; no
 - macOS 真实主界面：`Sources/ProtoSyncApp/DashboardView.swift`
 - macOS UI 状态：`Sources/ProtoSyncApp/AppModel.swift`
 - macOS 菜单栏与窗口：`Sources/ProtoSyncApp/main.swift`
-- UI 设计沙盒：`ProtoSyncUIDemo/DemoViews.swift`
-- UI 模拟状态：`ProtoSyncUIDemo/MockModel.swift`
+- UI 设计沙盒：`tools/ProtoSyncUIDemo/DemoViews.swift`
+- UI 模拟状态：`tools/ProtoSyncUIDemo/MockModel.swift`
 - Android 当前界面：`android/src/com/protosync/app/MainActivity.java`
 - Android 后台与通知：`android/src/com/protosync/app/SyncService.java`
 - 协议与真实状态：`Sources/Core/SyncEngine.swift`

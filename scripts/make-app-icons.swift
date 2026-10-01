@@ -9,7 +9,7 @@ import UniformTypeIdentifiers
 // 用法:swift make-app-icons.swift <项目根>
 
 let root = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "."
-let inURL = URL(fileURLWithPath: "\(root)/design/assets/protosync-logo-concept-v1.png")
+let inURL = URL(fileURLWithPath: "\(root)/docs/design/assets/protosync-logo-concept-v1.png")
 guard let src = CGImageSourceCreateWithURL(inURL as CFURL, nil),
       let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { fatalError("无法读取源图") }
 

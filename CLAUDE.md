@@ -23,9 +23,9 @@ private data** — see "Privacy" below.
 | `ios/` | iOS app (xcodegen project + SwiftUI), reuses `Core` |
 | `android/src/com/protosync/core/` | Java protocol stack — a second, independent implementation of the same wire protocol |
 | `android/src/com/protosync/app/` | Android UI and foreground service (plain Java, no Gradle) |
-| `android-compose-scaffold/` | Toolchain smoke test for a future Compose migration; not part of the real build |
-| `ProtoSyncUIDemo/` | UI sandbox with mock data |
-| `design/` | Signal Foundry design spec |
+| `tools/ProtoSyncUIDemo/` | UI sandbox with mock data (SwiftPM target; build with `scripts/make-demo-app.sh`). Has its own theme copy on purpose |
+| `tools/android-compose-scaffold/` | Toolchain smoke test for a future Compose migration; not part of the real build |
+| `docs/design/` | Signal Foundry design spec and logo assets |
 
 ## Build and test
 
@@ -85,11 +85,12 @@ Swift (`Sources/Core`) and Java (`android/src/com/protosync/core`) implement the
 ## Conventions
 
 - Code comments and UI strings are in Chinese. Match the surrounding style and comment density.
-- UI follows the Signal Foundry design (`design/PROTO_SYNC_VISUAL_DIRECTION.md`):
+- UI follows the Signal Foundry design (`docs/design/PROTO_SYNC_VISUAL_DIRECTION.md`):
   - Amber = security decision
   - Cyan = incoming data
   - Lime = success
   - Coral = error
+- `Sources/ProtoSyncApp/SignalTheme.swift` is the one theme file for macOS **and** iOS (`ios/project.yml` compiles it directly). Don't copy it into `ios/`.
 - Android stays plain Java with no Gradle (Java 8 source level).
 
 ## Privacy

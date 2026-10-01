@@ -28,7 +28,7 @@ let package = Package(
         // UI 设计沙盒:纯模拟数据,无传输层;验证过的设计再移植回 ProtoSyncApp
         .executableTarget(
             name: "ProtoSyncUIDemo",
-            path: "ProtoSyncUIDemo",
+            path: "tools/ProtoSyncUIDemo",
             resources: [.copy("Resources")]
         ),
     ]

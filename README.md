@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="design/assets/protosync-logo-concept-v1.png" width="120" alt="ProtoSync logo">
+  <img src="docs/design/assets/protosync-logo-concept-v1.png" width="120" alt="ProtoSync logo">
 </p>
 
 <h1 align="center">ProtoSync</h1>
@@ -89,10 +89,10 @@ adb install -r android/build/ProtoSync-android.apk
 Sources/            Swift 协议栈(Core,平台无关)+ macOS App + CLI 测试对端 + 测试
 ios/                iOS App(xcodegen 工程 + SwiftUI)
 android/            Android 客户端(纯 Java,无 Gradle 工具链)
-design/             Signal Foundry 设计规范与 logo 资产
 scripts/            图标生成 / macOS 打包脚本
 docs/               平台前置条件调研、真机部署指南
-ProtoSyncUIDemo/    UI 设计沙盒(模拟数据)
+docs/design/        Signal Foundry 设计规范与 logo 资产
+tools/              开发辅助(非发布产物):UI 设计沙盒、Compose 工具链冒烟测试
 ```
 
 ## 路线图
@@ -107,7 +107,7 @@ ProtoSyncUIDemo/    UI 设计沙盒(模拟数据)
 
 UI 遵循自研的 **Signal Foundry** 设计语言:工业控制台式的精密感 + 编辑排版的清晰度,
 Carbon/Paper 双表面 + Lime/Cyan/Amber/Coral 四语义信号色。详见
-[design/PROTO_SYNC_VISUAL_DIRECTION.md](design/PROTO_SYNC_VISUAL_DIRECTION.md)。
+[docs/design/PROTO_SYNC_VISUAL_DIRECTION.md](docs/design/PROTO_SYNC_VISUAL_DIRECTION.md)。
 
 ## License
 

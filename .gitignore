@@ -34,8 +34,8 @@ docs/dev/
 *.log
 
 # ---- Compose scaffold 构建产物 ----
-android-compose-scaffold/.gradle/
-android-compose-scaffold/build/
-android-compose-scaffold/app/build/
-android-compose-scaffold/app/.cxx/
-android-compose-scaffold/local.properties
+tools/android-compose-scaffold/.gradle/
+tools/android-compose-scaffold/build/
+tools/android-compose-scaffold/app/build/
+tools/android-compose-scaffold/app/.cxx/
+tools/android-compose-scaffold/local.properties

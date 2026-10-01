@@ -13,6 +13,8 @@ targets:
     platform: iOS
     sources:
       - path: ProtoSync
+      # 与 macOS 共用同一份设计令牌,避免两份拷贝漂移
+      - path: ../Sources/ProtoSyncApp/SignalTheme.swift
     dependencies:
       - package: ProtoSyncPackage
         products:

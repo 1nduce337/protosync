@@ -1,6 +1,6 @@
 import SwiftUI
 
-// Signal Foundry 设计令牌(见 design/PROTO_SYNC_VISUAL_DIRECTION.md §5-§6)
+// Signal Foundry 设计令牌(见 docs/design/PROTO_SYNC_VISUAL_DIRECTION.md §5-§6)
 
 extension Color {
     init(signal hex: UInt32) {
@@ -31,77 +31,6 @@ enum Signal {
 
     // 信号色上的文字用 Ink 900
     static let onLime = ink900
-}
-
-// MARK: - 调色板(深浅双主题,自 ProtoSyncUIDemo 移植)
-
-struct SP {
-    let canvas: Color          // 窗口画布
-    let headerBg: Color        // System Header
-    let railBg: Color          // 模式轨道
-    let panel: Color           // 面板底
-    let panelStroke: Color     // 面板描边
-    let divider: Color
-    let text: Color            // 主文字
-    let textDim: Color         // 次级文字
-    let nodeOnline: Color      // 节点在线色
-    let progressFill: Color    // 进度条填充
-    let limeText: Color        // 选中/主状态文字(浅色下用深色变体)
-    let cyanText: Color
-    let amberText: Color
-    let coralText: Color
-    let limeFill: Color        // 进度/填充用亮 Lime
-    let cyanFill: Color
-    let docBg: Color           // 文档表面画布
-    let docText: Color
-    let docTextDim: Color
-    let docDivider: Color
-    let onAccentText: Color    // 信号色填充上的文字(Ink 900)
-
-    static func make(_ scheme: ColorScheme) -> SP {
-        if scheme == .dark {
-            return SP(
-                canvas: Color(signal: 0x111417), headerBg: Color(signal: 0x080A0C),
-                railBg: Color(signal: 0x1B2025), panel: Color(signal: 0x1B2025),
-                panelStroke: Color(signal: 0x2C333A).opacity(0.7),
-                divider: Color(signal: 0x2C333A),
-                text: Color(signal: 0xF2F3EE), textDim: Color(signal: 0x707980),
-                nodeOnline: Color(signal: 0xE7FF16), progressFill: Color(signal: 0x25C7E8),
-                limeText: Color(signal: 0xE7FF16), cyanText: Color(signal: 0x25C7E8),
-                amberText: Color(signal: 0xFFB020), coralText: Color(signal: 0xFF5B55),
-                limeFill: Color(signal: 0xE7FF16), cyanFill: Color(signal: 0x25C7E8),
-                docBg: Color(signal: 0x111417), docText: Color(signal: 0xF2F3EE),
-                docTextDim: Color(signal: 0x707980), docDivider: Color(signal: 0x2C333A),
-                onAccentText: Color(signal: 0x15181B)
-            )
-        }
-        // 浅色:亮 Lime 在白底可读性差 → 文字/细线用深色变体,填充用降亮度变体
-        return SP(
-            canvas: Color(signal: 0xF2F3EE), headerBg: Color(signal: 0xFFFFFF),
-            railBg: Color(signal: 0xFFFFFF), panel: Color(signal: 0xFFFFFF),
-            panelStroke: Color(signal: 0xDDE0DA),
-            divider: Color(signal: 0xDDE0DA),
-            text: Color(signal: 0x15181B), textDim: Color(signal: 0x5A6167),
-            nodeOnline: Color(signal: 0x7A8A00), progressFill: Color(signal: 0xA8B400),
-            limeText: Color(signal: 0x5C6600), cyanText: Color(signal: 0x0E7A94),
-            amberText: Color(signal: 0x9A6700), coralText: Color(signal: 0xC93A34),
-            limeFill: Color(signal: 0xC5D400), cyanFill: Color(signal: 0x1BA6C4),
-            docBg: Color(signal: 0xFFFFFF), docText: Color(signal: 0x15181B),
-            docTextDim: Color(signal: 0x5A6167), docDivider: Color(signal: 0xDDE0DA),
-            onAccentText: Color(signal: 0x15181B)
-        )
-    }
-}
-
-// 环境注入:子视图直接 @Environment(\.sp) 取用
-private struct PaletteKey: EnvironmentKey {
-    static let defaultValue = SP.make(.dark)
-}
-extension EnvironmentValues {
-    var sp: SP {
-        get { self[PaletteKey.self] }
-        set { self[PaletteKey.self] = newValue }
-    }
 }
 
 // 状态标签:图标 + 文本 + 色彩 三件套(不依赖单一颜色传达状态)

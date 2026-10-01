@@ -1,6 +1,7 @@
 import SwiftUI
 
-// Signal Foundry 设计令牌(见 design/PROTO_SYNC_VISUAL_DIRECTION.md §5-§6)
+// Signal Foundry 设计令牌(见 docs/design/PROTO_SYNC_VISUAL_DIRECTION.md §5-§6)
+// 注:macOS 与 iOS 共用本文件(ios/project.yml 直接引用),请勿在 ios/ 下另存拷贝。
 
 extension Color {
     init(signal hex: UInt32) {

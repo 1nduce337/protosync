@@ -17,7 +17,7 @@
 ## 构建
 
 ```bash
-cd android-compose-scaffold
+cd tools/android-compose-scaffold
 gradle :app:assembleDebug --no-daemon
 # → app/build/outputs/apk/debug/app-debug.apk
 ```

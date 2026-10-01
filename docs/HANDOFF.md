@@ -3,7 +3,17 @@
 Shared status between Claude Code sessions (local Mac and cloud). Update before ending a session.
 No private data here — see "Privacy" in `CLAUDE.md`.
 
-_Last updated: 2026-09-30 (cloud session)_
+_Last updated: 2026-10-01 (local Mac session)_
+
+## Folder reorganisation (branch `chore/reorganize-folders`, branched from the branch below)
+
+- Moved `ProtoSyncUIDemo/` and `android-compose-scaffold/` into `tools/`; moved `design/` into `docs/design/`.
+- Updated every reference: `Package.swift`, `.gitignore`, both icon/logo scripts, README, CLAUDE.md, design doc, scaffold README.
+- Removed the duplicate `ios/ProtoSync/SignalTheme.swift`; `ios/project.yml` now compiles `Sources/ProtoSyncApp/SignalTheme.swift` directly. The demo keeps its own theme copy on purpose (it's the design sandbox).
+- ✅ Verified on the Mac: `swift build`, `swift run protosync-tests` (45/45), `swift build --target ProtoSyncUIDemo`, iOS simulator build (xcodegen + xcodebuild, unsigned).
+- ⚠️ Not run: `./scripts/make-app.sh`, `./scripts/make-demo-app.sh`, the icon/logo scripts after the path change, the Android build (Android sources were not touched).
+- Not done: deleting `android/legacy-backup/` and `DashboardView.swift`, cleaning untracked `.app` / `.bak` files.
+- This branch is based on the v2 hardening branch, so merge that one first (or merge them together).
 
 ## Active branch
 
@@ -55,6 +65,5 @@ _Last updated: 2026-09-30 (cloud session)_
 - Shared Swift/Java protocol test vectors checked in, so both test suites verify compatibility
 - Cleanup:
   - delete `android/legacy-backup/`
-  - dedupe the three `SignalTheme.swift` copies
-  - decide the fate of `android-compose-scaffold/`
+  - decide the long-term fate of `tools/android-compose-scaffold/`
 - Android clipboard images, Windows client, HarmonyOS NEXT client, Bluetooth discovery (roadmap)
