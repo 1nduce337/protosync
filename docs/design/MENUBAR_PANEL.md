@@ -29,7 +29,12 @@ Anything that needs a decision appears in the panel, and nothing else asks for a
    - Each item shows its source device and time.
 6. **Footer**: a hint ("拖文件到头像即可发送") and a link to open the inbox.
 
-Right-clicking the menu-bar icon keeps the classic menu. The full window is now "设备与设置", opened from the gear menu or the right-click menu, and no longer opens at launch.
+Right-clicking the menu-bar icon keeps the classic menu.
+
+**Menu-bar icon feedback:** the logo template icon briefly changes, and the tooltip says what happened.
+- **Sent** (this Mac's copy synced): `arrow.up.circle.fill`, template, 1.5 s.
+- **Received** (clipboard or file from another device): `arrow.down.circle.fill`, ink arrow on a Lime circle, 3 s. This is the one place Lime appears in the menu bar: receiving changes your clipboard, so it should be noticed.
+- The optional "同步时发送通知" switch adds system banners for both. The full window is now "设备与设置", opened from the gear menu or the right-click menu, and no longer opens at launch.
 
 ## Visual rules
 

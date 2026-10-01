@@ -10,7 +10,9 @@ struct SettingsView: View {
     @ObservedObject var model: AppModel
     // 与 AppDelegate / 右键菜单读写同一组 UserDefaults 键
     @AppStorage("backgroundClipboardReading") private var backgroundReading = true
-    @AppStorage("syncSuccessNotification") private var syncNotify = false
+    @AppStorage(Notifier.syncNotifyKey) private var syncNotify = false
+    /// 系统设置里关掉了本 App 的通知(开关打开也不会弹),显示去设置的提示
+    @State private var notificationsBlocked = false
     @State private var pendingRemoval: DeviceRow?
     @State private var copiedFingerprint = false
 
@@ -209,9 +211,34 @@ struct SettingsView: View {
             toggleRow("在后台读取剪贴板", detail: "关闭后只在面板或本窗口打开时同步",
                       isOn: $backgroundReading)
             SettingsDivider()
-            toggleRow("同步成功时发送通知", detail: "菜单栏图标会短暂显示对勾，通知是额外提醒",
+            toggleRow("同步时发送通知", detail: "发出或收到剪贴板、收到文件时提醒；菜单栏图标始终会短暂提示",
                       isOn: $syncNotify)
+            if syncNotify && notificationsBlocked {
+                SettingsDivider()
+                SettingsRow {
+                    Image(systemName: "bell.slash")
+                        .foregroundStyle(.secondary)
+                    Text("系统设置里关闭了 ProtoSync 的通知")
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("打开通知设置") { Notifier.shared.openSystemSettings() }
+                        .buttonStyle(PanelButtonStyle(prominent: false))
+                        .fixedSize()
+                }
+            }
         }
+        .onAppear(perform: checkNotifications)
+        .onChange(of: syncNotify) { _ in checkNotifications() }
+        // 从系统设置改完回来时刷新提示
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            checkNotifications()
+        }
+    }
+
+    private func checkNotifications() {
+        guard syncNotify else { notificationsBlocked = false; return }
+        Notifier.shared.checkAuthorization { allowed in notificationsBlocked = !allowed }
     }
 
     private func toggleRow(_ title: String, detail: String, isOn: Binding<Bool>) -> some View {

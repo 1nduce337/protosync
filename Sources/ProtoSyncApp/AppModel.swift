@@ -1,7 +1,6 @@
 import Foundation
 import AppKit
 import Combine
-import UserNotifications
 import Core
 
 /// SwiftUI 与 SyncEngine 之间的桥:引擎回调(主线程)→ @Published 状态。
@@ -71,6 +70,9 @@ final class AppModel: ObservableObject, SyncEngine.Delegate {
         var progress: Double?     // 传输中 0...1,完成/失败为 nil
         var failed: Bool
     }
+
+    /// 收到其他设备的剪贴板或文件时调用(菜单栏图标切换为"已接收"指示),参数为提示文字
+    var onReceived: ((String) -> Void)?
 
     private var transferIds: [String: UUID] = [:]  // 传输 id → 活动条目 id
     private var refreshTimer: Timer?
@@ -225,11 +227,8 @@ final class AppModel: ObservableObject, SyncEngine.Delegate {
         // (多端互连时未配对连接频繁到达,表现为"每几秒被隐形窗口抢走焦点")。
         // 主窗口不可见时改用系统通知提醒,不抢焦点。
         if NSApp.mainWindow == nil {
-            let content = UNMutableNotificationContent()
-            content.title = "ProtoSync 配对请求"
-            content.body = "设备「\(info.name)」请求配对,点菜单栏图标处理"
-            let request = UNNotificationRequest(identifier: "pairing-request", content: content, trigger: nil)
-            UNUserNotificationCenter.current().add(request)
+            Notifier.shared.post(id: "pairing-request", title: "ProtoSync 配对请求",
+                                 body: "设备「\(info.name)」请求配对，点菜单栏图标处理")
         }
     }
 
@@ -253,17 +252,14 @@ final class AppModel: ObservableObject, SyncEngine.Delegate {
         fileOffers.append(FileOfferPrompt(offer: offer, reply: reply))
         // 与配对请求一致:不抢焦点,主窗口不可见时发系统通知
         if NSApp.mainWindow == nil {
-            let content = UNMutableNotificationContent()
-            content.title = "ProtoSync 文件请求"
-            content.body = "「\(offer.from.name)」想发送「\(offer.name)」,点菜单栏图标处理"
-            let request = UNNotificationRequest(identifier: "file-offer-\(offer.id)", content: content, trigger: nil)
-            UNUserNotificationCenter.current().add(request)
+            Notifier.shared.post(id: "file-offer-\(offer.id)", title: "ProtoSync 文件请求",
+                                 body: "「\(offer.from.name)」想发送「\(offer.name)」，点菜单栏图标处理")
         }
     }
 
     func engine(_ engine: SyncEngine, fileOfferExpired id: String) {
         fileOffers.removeAll { $0.id == id }
-        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: ["file-offer-\(id)"])
+        Notifier.shared.remove(ids: ["file-offer-\(id)"])
     }
 
     func engine(_ engine: SyncEngine, fileAwaitingApproval id: String, name: String) {
@@ -275,6 +271,9 @@ final class AppModel: ObservableObject, SyncEngine.Delegate {
     func engine(_ engine: SyncEngine, didReceiveClipboardText text: String, from peer: PeerConnection.PeerInfo) {
         ClipboardMonitor.write(text: text)
         recordClip(.text(text), source: peer.name)
+        onReceived?("已收到「\(peer.name)」的剪贴板")
+        Notifier.shared.postSync(id: "clipboard-received", title: "收到「\(peer.name)」的剪贴板",
+                                 body: String(text.prefix(80)))
         appendActivity({ $0.detail = "文本 · \(text.count) 字" }, base: ActivityEntry(
             id: UUID(), kind: .text, direction: .incoming,
             title: String(text.prefix(60)), detail: "已复制到剪贴板", time: Date(), progress: nil, failed: false))
@@ -283,6 +282,9 @@ final class AppModel: ObservableObject, SyncEngine.Delegate {
     func engine(_ engine: SyncEngine, didReceiveClipboardImage png: Data, from peer: PeerConnection.PeerInfo) {
         ClipboardMonitor.write(png: png)
         recordClip(.image(png), source: peer.name)
+        onReceived?("已收到「\(peer.name)」的图片")
+        Notifier.shared.postSync(id: "clipboard-received", title: "收到「\(peer.name)」的剪贴板",
+                                 body: "图片 · \(png.count / 1024) KB，已复制到剪贴板")
         appendActivity({ $0.detail = "图片 · \(png.count / 1024) KB" }, base: ActivityEntry(
             id: UUID(), kind: .image, direction: .incoming,
             title: "图片", detail: "已复制到剪贴板", time: Date(), progress: nil, failed: false))
@@ -315,8 +317,11 @@ final class AppModel: ObservableObject, SyncEngine.Delegate {
         if let error {
             activities[idx].failed = true
             activities[idx].detail = "失败:\(error)"
-        } else if let url {
+        } else if url != nil {
             activities[idx].detail = "已保存到收件箱"
+            onReceived?("已收到文件「\(name)」")
+            Notifier.shared.postSync(id: "file-received-\(id)", title: "已收到文件",
+                                     body: "「\(name)」已保存到收件箱")
         } else {
             activities[idx].detail = "发送完成"
         }

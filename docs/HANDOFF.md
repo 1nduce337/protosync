@@ -3,7 +3,7 @@
 Shared status between Claude Code sessions (local Mac and cloud). Update before ending a session.
 No private data here — see "Privacy" in `CLAUDE.md`.
 
-_Last updated: 2026-10-01 (local Mac session)_
+_Last updated: 2026-10-01 (cloud session, Round 10)_
 
 ## In progress: menu-bar panel UI (branch `feat/menubar-popover-ui`)
 
@@ -178,6 +178,32 @@ The user reported two bugs:
   3. Tag `v0.0.1` and push the tag.
   4. Create the GitHub pre-release "ProtoSync 0.0.1" with `docs/releases/v0.0.1.md` as the body and the three `dist/` files attached.
   5. If `gh` isn't set up, the user creates the release on github.com (Releases → Draft a new release) and uploads the files from `dist/`.
+
+### Round 10 (cloud; Swift unverified): macOS notifications fixed, "received" indicator in the menu bar
+
+The user reported: the "同步时发送通知" switch is on but nothing appears; and receiving a clipboard from another device shows nothing in the menu bar. **The release is on hold until this is checked.**
+- **Why notifications never showed:**
+  - there was no `UNUserNotificationCenterDelegate`, so macOS silently dropped every notification while ProtoSync was the active app (always the case right after clicking the panel);
+  - `add()` errors were ignored, so a denied permission failed silently;
+  - the switch only covered *sending* the clipboard, never receiving.
+- **Fix:** new `Sources/ProtoSyncApp/Notifier.swift` (one entry point):
+  - sets the delegate, and `willPresent` returns `.banner, .list`;
+  - logs authorization and `add()` errors via `PLog`;
+  - skips everything when there is no bundle (`swift run`), since `UNUserNotificationCenter.current()` crashes there.
+  - All existing notifications (pairing request, file request) now go through it.
+- **The switch now covers:** clipboard sent, clipboard received, file received. Renamed to "同步时发送通知" in the settings window and the right-click menu (same `UserDefaults` key `syncSuccessNotification`).
+- **Settings window:** when the switch is on but macOS blocks notifications, a row "系统设置里关闭了 ProtoSync 的通知" with an "打开通知设置" button appears. It re-checks when the app becomes active again. The right-click menu opens System Settings directly in that case.
+- **Menu-bar indicator** (`main.swift`, `showPulse`):
+  - *sent* (this Mac's copy synced): `arrow.up.circle.fill`, template (follows the menu-bar colour), 1.5 s. Replaces the old checkmark, which forced `darkAqua` and was white on a light menu bar;
+  - *received* (clipboard or file from another device): `arrow.down.circle.fill` in palette colours, ink arrow on a Lime circle, visible on light and dark menu bars, 3 s; the tooltip names the sender (e.g. "已收到「X」的剪贴板").
+  - `AppModel.onReceived` is the hook, called from the clipboard-received and file-saved callbacks.
+- ⚠️ **Unverified (cloud has no Swift):** `swift build`, then check by hand:
+  1. with the switch on, copying on the Mac shows a banner even while the panel is open;
+  2. receiving a clipboard from the phone shows a banner and the Lime ↓ icon for 3 s;
+  3. if the palette colours come out reversed (Lime arrow on a dark circle), swap `[ink, lime]` in `receivedImage`;
+  4. turning notifications off for ProtoSync in System Settings makes the hint row appear.
+- Note: the permission prompt is shown once by macOS. If the user dismissed it earlier, ProtoSync is listed in System Settings › Notifications and has to be enabled there (the new hint row links to it).
+- **Next on the Mac:** build and check the above, then do the release steps from Round 9 (run `scripts/package-release.sh 0.0.1` again so the zip includes this fix).
 
 ## Folder reorganisation (merged into `main`)
 

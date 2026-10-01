@@ -1,6 +1,5 @@
 import AppKit
 import SwiftUI
-import UserNotifications
 import Darwin
 import Core
 
@@ -24,10 +23,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         get { UserDefaults.standard.object(forKey: "backgroundClipboardReading") as? Bool ?? true }
         set { UserDefaults.standard.set(newValue, forKey: "backgroundClipboardReading") }
     }
-    /// 同步成功时发系统通知(默认关:每次复制都会弹,嫌吵就关;菜单栏 ✓ 闪烁始终提供轻量反馈)。
+    /// 同步时发系统通知(默认关:每次复制都会弹,嫌吵就关;菜单栏图标的发出/收到指示始终提供轻量反馈)。
     private var syncNotify: Bool {
-        get { UserDefaults.standard.bool(forKey: "syncSuccessNotification") }
-        set { UserDefaults.standard.set(newValue, forKey: "syncSuccessNotification") }
+        get { Notifier.syncNotifyEnabled }
+        set { UserDefaults.standard.set(newValue, forKey: Notifier.syncNotifyKey) }
     }
 
     /// App Nap 抑制:菜单栏应用窗口关掉后会被系统节流,0.4s 的剪贴板轮询可能被推迟到数分钟,
@@ -45,18 +44,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 主窗口或弹出面板可见才允许读取(仅当全局读取关闭时参与判断)。
     private var windowVisible: Bool { window?.isVisible == true || popover?.isShown == true }
 
-    // MARK: - 同步成功反馈
+    // MARK: - 同步反馈
 
-    private var tickResetTimer: Timer?
     private func clipboardDidSync(peerCount: Int) {
         guard peerCount > 0 else { return }
-        flashTick()
-        guard syncNotify else { return }
-        let content = UNMutableNotificationContent()
-        content.title = "剪贴板已同步"
-        content.body = "已同步至 \(peerCount) 台设备"
-        let request = UNNotificationRequest(identifier: "clipboard-sync", content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request)
+        showPulse(.sent, tooltip: "剪贴板已同步至 \(peerCount) 台设备")
+        Notifier.shared.postSync(id: "clipboard-sync", title: "剪贴板已同步",
+                                 body: "已同步至 \(peerCount) 台设备")
     }
 
     /// 菜单栏图标:logo 剪影模板图(系统按菜单栏深浅自动着色),由 scripts/make-app-icons.swift 生成;
@@ -84,17 +78,43 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                         accessibilityDescription: "ProtoSync")
     }
 
-    /// 菜单栏图标短暂切换为对勾,提示同步成功。
-    private func flashTick() {
-        guard let button = statusItem.button else { return }
-        button.image = NSImage(systemSymbolName: "checkmark.circle.fill",
-                               accessibilityDescription: "剪贴板已同步")
-        button.appearance = NSAppearance(named: .darkAqua) // 浅色菜单栏上保持可见
-        tickResetTimer?.invalidate()
-        tickResetTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in
+    /// 菜单栏图标的短暂指示:
+    /// - 发出(本机复制已同步):上箭头,跟随菜单栏颜色,1.5 秒;
+    /// - 收到(其他设备的剪贴板或文件):Lime 圆底 + 深色下箭头,深浅菜单栏都醒目,3 秒,悬停显示来源。
+    private enum Pulse { case sent, received }
+    private var pulseResetTimer: Timer?
+
+    private static let receivedImage: NSImage? = {
+        let ink = NSColor(srgbRed: 0x15 / 255.0, green: 0x18 / 255.0, blue: 0x1B / 255.0, alpha: 1)
+        let lime = NSColor(srgbRed: 0xE7 / 255.0, green: 0xFF / 255.0, blue: 0x16 / 255.0, alpha: 1)
+        let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [ink, lime]))   // [箭头, 圆底]
+        let image = NSImage(systemSymbolName: "arrow.down.circle.fill", accessibilityDescription: "已收到")?
+            .withSymbolConfiguration(config)
+        image?.isTemplate = false
+        return image
+    }()
+
+    private static let sentImage: NSImage? = {
+        let config = NSImage.SymbolConfiguration(pointSize: 15, weight: .semibold)
+        let image = NSImage(systemSymbolName: "arrow.up.circle.fill", accessibilityDescription: "已同步")?
+            .withSymbolConfiguration(config)
+        image?.isTemplate = true
+        return image
+    }()
+
+    private func showPulse(_ pulse: Pulse, tooltip: String) {
+        guard let button = statusItem?.button else { return }
+        button.image = (pulse == .received ? Self.receivedImage : Self.sentImage) ?? defaultStatusImage
+        button.toolTip = tooltip
+        button.setAccessibilityLabel("ProtoSync，\(tooltip)")
+        pulseResetTimer?.invalidate()
+        pulseResetTimer = Timer.scheduledTimer(withTimeInterval: pulse == .received ? 3 : 1.5,
+                                               repeats: false) { [weak self] _ in
             guard let self, let button = self.statusItem.button else { return }
             button.image = self.defaultStatusImage
-            button.appearance = nil
+            button.toolTip = "ProtoSync"
+            button.setAccessibilityLabel("ProtoSync")
         }
     }
 
@@ -133,15 +153,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         setupStatusItem()
         setupClipboardMonitor()
+        model.onReceived = { [weak self] text in self?.showPulse(.received, tooltip: text) }
         updateNapActivity()
         NotificationCenter.default.addObserver(forName: UserDefaults.didChangeNotification, object: nil,
                                                queue: .main) { [weak self] _ in
             self?.updateNapActivity()
         }
 
-        if Bundle.main.bundleIdentifier != nil {
-            UNUserNotificationCenter.current().requestAuthorization(options: [.alert]) { _, _ in }
-        }
+        Notifier.shared.setUp()
         PLog.info("ProtoSync 已启动 (fp \(DeviceIdentity.shortFingerprint(model.store.identity.fingerprint)))")
     }
 
@@ -157,6 +176,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.image = defaultStatusImage
+        statusItem.button?.toolTip = "ProtoSync"
         statusItem.button?.target = self
         statusItem.button?.action = #selector(statusItemClicked(_:))
         statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -245,6 +265,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleSyncNotify() {
         syncNotify.toggle()
+        guard syncNotify else { return }
+        Notifier.shared.checkAuthorization { allowed in
+            if !allowed { Notifier.shared.openSystemSettings() }
+        }
     }
 
     // MARK: - 菜单栏
@@ -258,7 +282,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let bgItem = menu.addItem(withTitle: "后台读取剪贴板(全局)",
                                   action: #selector(toggleBackgroundReading), keyEquivalent: "")
         bgItem.state = backgroundReading ? .on : .off
-        let notifyItem = menu.addItem(withTitle: "同步成功时系统通知",
+        let notifyItem = menu.addItem(withTitle: "同步时发送通知",
                                       action: #selector(toggleSyncNotify), keyEquivalent: "")
         notifyItem.state = syncNotify ? .on : .off
         menu.addItem(.separator())
