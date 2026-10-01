@@ -206,6 +206,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                               styleMask: [.titled, .closable, .resizable, .miniaturizable],
                               backing: .buffered, defer: false)
             window.title = "ProtoSync · 设备与设置"
+            window.appearance = NSAppearance(named: .darkAqua)   // 与菜单栏面板同为深色
             window.contentView = NSHostingView(rootView: SettingsView(model: model))
             window.center()
             window.isReleasedWhenClosed = false

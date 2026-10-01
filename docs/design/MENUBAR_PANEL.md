@@ -44,13 +44,21 @@ Right-clicking the menu-bar icon keeps the classic menu. The full window is now 
 
 ## 设备与设置 window (macOS)
 
-A native grouped `Form` that follows the system's light/dark mode, with no Lime. It has these sections:
-- pending pairing / file requests;
-- 本机 (name, full fingerprint, address);
-- 已配对设备 (online state, 自动接收文件, remove with confirmation);
-- 附近的设备;
-- 剪贴板 (sync, background reading, notifications);
-- 收到的文件.
+The same visual language as the panel, in a calmer, roomier layout:
+- always dark;
+- groups are `white 6%` fills with 10 pt corners;
+- section titles are 11 pt secondary;
+- rows are at least 44 pt tall with hairline dividers.
+
+Lime is limited to switches that are on, online dots and primary buttons (配对).
+
+Contents, top to bottom:
+- **Header:** a 56 pt device circle for this Mac, the editable name, the short fingerprint with "复制完整指纹", the online count, and the address (click to copy).
+- **Pending requests:** the same `PanelPairingCard` / `PanelOfferCard` the panel uses.
+- **已配对设备:** 34 pt avatars, status and short fingerprint, the "自动接收" switch, and a ⋯ / right-click menu to remove (confirmed).
+- **附近的设备**, with a quiet "重新查找" link.
+- **剪贴板:** three switches, each with a one-line explanation.
+- **收到的文件:** the folder and the 5 most recent files.
 
 ## iOS
 
