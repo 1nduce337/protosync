@@ -10,6 +10,7 @@ private data** — see "Privacy" below.
 
 - **Start:** read `docs/HANDOFF.md` for current status, the active branch and next steps. Pull that branch first.
 - **End:** update `docs/HANDOFF.md` (done / in progress / unverified / next), then commit and push.
+- When editing `docs/HANDOFF.md`, keep every existing heading: insert new sections *before* the next heading instead of replacing it, then compare the heading list before and after (`grep '^#' docs/HANDOFF.md`).
 - Only one agent works on a given branch at a time. If a branch is mid-task in another session, use a new branch.
 
 ## Layout
@@ -92,7 +93,7 @@ Swift (`Sources/Core`) and Java (`android/src/com/protosync/core`) implement the
   - Chinese-only copy with full-width punctuation;
   - no console-style English tags.
 - The macOS settings window uses native `Form` controls instead, and no Lime.
-- Android still uses the legacy Signal Foundry look (`docs/design/PROTO_SYNC_VISUAL_DIRECTION.md`) until it is migrated.
+- Android follows the same panel design: tokens and builders live in `android/src/com/protosync/app/PanelUi.java` (the Java mirror of `PanelStyle.swift`); keep the two in sync.
 - `Sources/ProtoSyncApp/PanelStyle.swift` and `SignalTheme.swift` are shared by macOS **and** iOS (`ios/project.yml` compiles them directly). Don't copy them into `ios/`.
 - Android stays plain Java with no Gradle (Java 8 source level).
 

@@ -1,6 +1,7 @@
 package com.protosync.app;
 
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.ClipData;
 import android.content.ClipDescription;
 import android.content.ClipboardManager;
@@ -9,8 +10,9 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.ServiceConnection;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
+import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
@@ -18,15 +20,16 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.provider.MediaStore;
-import android.text.method.ScrollingMovementMethod;
+import android.text.TextUtils;
 import android.view.Gravity;
+import android.view.MenuItem;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
-import android.widget.EditText;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
+import android.widget.PopupMenu;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -42,34 +45,48 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.WeakHashMap;
+
+import static com.protosync.app.PanelUi.ACCENT;
+import static com.protosync.app.PanelUi.CORAL;
+import static com.protosync.app.PanelUi.FILL;
+import static com.protosync.app.PanelUi.FILL_STRONG;
+import static com.protosync.app.PanelUi.TEXT;
+import static com.protosync.app.PanelUi.TEXT_SECONDARY;
 
 /**
- * Signal Foundry 单页指挥面板(设计文档 §8.2):
- * System Header → 主操作 → Transfer Track(按需)→ 已配对 / 附近 / 活动 → 诊断折叠区。
+ * 单屏面板(设计方向 B 的 Android 版,见 docs/design/MENUBAR_PANEL.md):
+ * 设备头像 → 待决请求(配对 / 文件)→ 传输 → 剪贴板历史 → 收到的文件;底部固定“发送剪贴板”。
  * 所有引擎调用都是 SyncCore 的投递式 API,UI 线程不做任何网络 I/O。
  */
 public class MainActivity extends Activity implements SyncService.Ui {
     private SyncService svc;
     private SyncCore core; // 可能为 null(服务引擎尚未就绪)
 
-    private TextView statusText, onlineCount, fingerprintText;
-    private TextView transferProgressName, transferProgressPercent, transferMoreLabel;
-    private LinearLayout deviceList, nearbyList, activityList, transferCard, diagPanel;
-    private TransferTrackView transferTrack;
-    private TextView logView, diagToggle;
-    private EditText manualInput;
-    private Button scanButton;
-    private final StringBuilder logBuf = new StringBuilder();
-    private android.app.AlertDialog pairingDialog;
-    private android.app.AlertDialog fileOfferDialog;
-    private String fileOfferDialogId;
+    private TextView statusText;
+    private LinearLayout devicesBox, nearbyBox, requestsBox, transfersBox, historyBox, filesBox;
+    private Button sendClipboardButton;
+    private View sendFileButton;
+    private SettingsDialog settings;
+    final StringBuilder logBuf = new StringBuilder();
     private final Handler ui = new Handler(Looper.getMainLooper());
-    private boolean diagExpanded = false;
+    private final WeakHashMap<SyncCore.ClipItem, Bitmap> thumbs = new WeakHashMap<>();
+    private final WeakHashMap<SyncCore.ClipItem, int[]> originalSizes = new WeakHashMap<>();
+    private boolean showNearby = false;
+
+    /** 当前展示的配对请求 {name, fp};由服务逐个派发,决定后服务派发下一个 */
+    private String[] activePair;
+
+    /** 当前展示的文件请求 */
+    private static class OfferUi {
+        String id, name, fromName; long size;
+    }
+    private OfferUi activeOffer;
 
     /** 活动传输:id → 展示状态(完成/失败态短暂停留后自动清出)。 */
     private static class TransferUi {
         String name; double fraction; boolean incoming;
-        String state; // syncing | done | failed
+        String state; // syncing | waiting | done | failed
     }
     private final LinkedHashMap<String, TransferUi> transfers = new LinkedHashMap<>();
 
@@ -92,51 +109,32 @@ public class MainActivity extends Activity implements SyncService.Ui {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        // 平台 DayNight 主题 API 29+;更早设备退回深色 DeviceDefault
-        if (Build.VERSION.SDK_INT >= 29) setTheme(android.R.style.Theme_DeviceDefault_DayNight);
-        else setTheme(android.R.style.Theme_DeviceDefault);
+        // 面板固定深色(与 macOS / iOS 一致)
+        setTheme(android.R.style.Theme_DeviceDefault_NoActionBar);
         super.onCreate(savedInstanceState);
-        setTitle("ProtoSync");
+        getWindow().setStatusBarColor(PanelUi.CANVAS);
+        getWindow().setNavigationBarColor(PanelUi.CANVAS);
         if (savedInstanceState != null) {
             savedTargetFp = savedInstanceState.getString(STATE_TARGET_FP);
         }
 
         setContentView(R.layout.activity_main);
         statusText = findViewById(R.id.statusText);
-        onlineCount = findViewById(R.id.onlineCount);
-        deviceList = findViewById(R.id.deviceList);
-        nearbyList = findViewById(R.id.nearbyList);
-        activityList = findViewById(R.id.activityList);
-        transferCard = findViewById(R.id.transferCard);
-        transferTrack = findViewById(R.id.transferTrack);
-        transferProgressName = findViewById(R.id.transferName);
-        transferProgressPercent = findViewById(R.id.transferPercent);
-        transferMoreLabel = findViewById(R.id.transferMore);
-        fingerprintText = findViewById(R.id.fingerprintText);
-        logView = findViewById(R.id.logView);
-        logView.setMovementMethod(new ScrollingMovementMethod());
-        diagToggle = findViewById(R.id.diagToggle);
-        diagPanel = findViewById(R.id.diagPanel);
-        manualInput = findViewById(R.id.manualInput);
-        scanButton = findViewById(R.id.scanButton);
+        LinearLayout content = findViewById(R.id.content);
+        devicesBox = section(content, 0);
+        nearbyBox = section(content, 18);
+        requestsBox = section(content, 18);
+        transfersBox = section(content, 18);
+        historyBox = section(content, 26);
+        filesBox = section(content, 26);
 
-        ((ImageView) findViewById(R.id.logo)).setImageResource(
-                isNightMode() ? R.drawable.protosync_logo_dark : R.drawable.protosync_logo_light);
-
-        findViewById(R.id.sendClipboardButton).setOnClickListener(v -> sendClipboard());
-        findViewById(R.id.sendFileButton).setOnClickListener(v -> pickFileWithChooser());
-        findViewById(R.id.connectButton).setOnClickListener(v -> manualConnect());
-        scanButton.setOnClickListener(v -> {
-            if (core == null) { toast("引擎启动中"); return; }
-            core.refreshDiscovery();
-            scanButton.setText("SCAN…");
-            scanButton.postDelayed(() -> scanButton.setText("SCAN"), 1200);
-        });
-        diagToggle.setOnClickListener(v -> {
-            diagExpanded = !diagExpanded;
-            diagPanel.setVisibility(diagExpanded ? View.VISIBLE : View.GONE);
-            diagToggle.setText(diagExpanded ? "高级连接与诊断 ▾" : "高级连接与诊断 ▸");
-        });
+        sendClipboardButton = findViewById(R.id.sendClipboardButton);
+        sendClipboardButton.setBackground(PanelUi.pressable(this, ACCENT, 12));
+        sendClipboardButton.setOnClickListener(v -> sendClipboard());
+        sendFileButton = findViewById(R.id.sendFileButton);
+        sendFileButton.setBackground(PanelUi.pressable(this, FILL_STRONG, 12));
+        sendFileButton.setOnClickListener(v -> pickFileWithChooser());
+        findViewById(R.id.settingsButton).setOnClickListener(v -> openSettings());
 
         if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED) {
@@ -144,12 +142,14 @@ public class MainActivity extends Activity implements SyncService.Ui {
         }
 
         startForegroundService(new Intent(this, SyncService.class));
+        renderAll();
     }
 
-    private boolean isNightMode() {
-        int mask = getResources().getConfiguration().uiMode
-                & android.content.res.Configuration.UI_MODE_NIGHT_MASK;
-        return mask == android.content.res.Configuration.UI_MODE_NIGHT_YES;
+    private LinearLayout section(LinearLayout parent, float topMarginDp) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        parent.addView(box, PanelUi.matchWrap(this, topMarginDp));
+        return box;
     }
 
     @Override
@@ -166,19 +166,27 @@ public class MainActivity extends Activity implements SyncService.Ui {
     }
 
     @Override
+    protected void onDestroy() {
+        if (settings != null && settings.isShowing()) settings.dismiss();
+        super.onDestroy();
+    }
+
+    @Override
     protected void onSaveInstanceState(Bundle outState) {
         super.onSaveInstanceState(outState);
         outState.putString(STATE_TARGET_FP, pendingFileTargetFp);
     }
 
-    // ---- 主操作 ----
+    SyncCore core() { return core; }
+
+    // ================= 主操作 =================
 
     /** 手动发送剪贴板:文本优先,其次图片。发送结果由 onClipboardResult 回调提示。 */
     private void sendClipboard() {
         if (core == null) { toast("引擎启动中"); return; }
         ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
         ClipData clip = cm.getPrimaryClip();
-        if (clip == null || clip.getItemCount() == 0) { toast("剪贴板为空"); return; }
+        if (clip == null || clip.getItemCount() == 0) { toast("剪贴板是空的"); return; }
         ClipData.Item item = clip.getItemAt(0);
 
         CharSequence text = item.coerceToText(this);
@@ -194,14 +202,14 @@ public class MainActivity extends Activity implements SyncService.Ui {
         }
         try (InputStream in = getContentResolver().openInputStream(item.getUri())) {
             if (in == null) { toast("无法读取剪贴板图片"); return; }
-            android.graphics.Bitmap bmp = BitmapFactory.decodeStream(in);
+            Bitmap bmp = BitmapFactory.decodeStream(in);
             if (bmp == null) { toast("无法解码剪贴板图片"); return; }
             java.io.ByteArrayOutputStream bos = new java.io.ByteArrayOutputStream();
-            bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, bos);
+            bmp.compress(Bitmap.CompressFormat.PNG, 100, bos);
             bmp.recycle();
             core.sendClipboardImage(bos.toByteArray());
         } catch (Exception e) {
-            toast("读取剪贴板图片失败: " + e.getMessage());
+            toast("读取剪贴板图片失败：" + e.getMessage());
         }
     }
 
@@ -212,8 +220,8 @@ public class MainActivity extends Activity implements SyncService.Ui {
         if (online.size() == 1) { pickFile(online.get(0)[0]); return; }
         String[] names = new String[online.size()];
         for (int i = 0; i < online.size(); i++) names[i] = online.get(i)[1];
-        new android.app.AlertDialog.Builder(this)
-                .setTitle("发送给哪台设备?")
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("发送给哪台设备？")
                 .setItems(names, (d, which) -> pickFile(online.get(which)[0]))
                 .show();
     }
@@ -234,12 +242,12 @@ public class MainActivity extends Activity implements SyncService.Ui {
                 && data.getData() != null) {
             // Activity 重建后目标可能丢失:无法证明原目标就中止,绝不静默改发其他设备
             String target = pendingFileTargetFp != null ? pendingFileTargetFp : savedTargetFp;
-            if (target == null) { toast("发送目标丢失,请重新选择"); return; }
+            if (target == null) { toast("发送目标丢失，请重新选择"); return; }
             boolean stillOnline = false;
             if (core != null) {
                 for (String[] o : core.onlinePeersSnapshot()) if (o[0].equals(target)) stillOnline = true;
             }
-            if (!stillOnline) { toast("目标设备已离线,发送取消"); return; }
+            if (!stillOnline) { toast("目标设备已离线，发送取消"); return; }
             final String finalTarget = target;
             final android.net.Uri uri = data.getData();
             new Thread(() -> {
@@ -261,309 +269,448 @@ public class MainActivity extends Activity implements SyncService.Ui {
         return "file";
     }
 
-    private void manualConnect() {
+    private void openSettings() {
         if (core == null) { toast("引擎启动中"); return; }
-        String text = manualInput.getText().toString().trim();
-        int colon = text.lastIndexOf(':');
-        if (colon <= 0) { toast("格式:IP:端口"); return; }
-        try {
-            String host = text.substring(0, colon).trim();
-            if (host.startsWith("[") && host.endsWith("]")) host = host.substring(1, host.length() - 1);
-            Integer.parseInt(text.substring(colon + 1).trim());
-            core.connectTo(host, Integer.parseInt(text.substring(colon + 1).trim()));
-        } catch (Exception e) {
-            toast("地址无效: " + e.getMessage());
-        }
+        if (settings == null) settings = new SettingsDialog(this);
+        settings.refresh();
+        settings.show();
     }
 
-    // ---- 状态渲染 ----
+    void confirmRemove(String fp, String name) {
+        new AlertDialog.Builder(this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                .setTitle("移除「" + name + "」？")
+                .setMessage("移除后需要重新配对才能互传剪贴板和文件。")
+                .setPositiveButton("移除", (d, w) -> {
+                    if (core != null) core.removePaired(fp);
+                    log("已移除 " + name);
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
 
-    private void refreshEngine() {
+    // ================= 渲染 =================
+
+    private void renderAll() {
         if (core == null && svc != null) core = svc.isReady() ? svc.core() : null;
-        if (core == null) {
+        boolean ready = core != null && core.fingerprint().length() >= 8;
+        if (!ready) {
             statusText.setText("引擎启动中…");
-            onlineCount.setText("00");
-            return;
+        } else {
+            int online = core.onlinePeersSnapshot().size();
+            statusText.setText(online == 0 ? "没有设备在线" : online + " 台设备在线");
         }
-        // 引擎线程启动是异步的:isRunning 先于身份加载完成,指纹可能还是空串
-        String fp = core.fingerprint();
-        if (fp.length() < 8) {
-            statusText.setText("引擎启动中…");
-            onlineCount.setText(String.format(Locale.US, "%02d", core.onlinePeersSnapshot().size()));
-            return;
-        }
-        statusText.setText("运行中 · 指纹 " + fp.substring(0, 8));
-        onlineCount.setText(String.format(Locale.US, "%02d", core.onlinePeersSnapshot().size()));
-        fingerprintText.setText("本机指纹 " + fp);
-        renderDevices(core);
-        renderNearby(core);
-        renderActivity(core);
+        sendClipboardButton.setEnabled(ready);
+        sendClipboardButton.setAlpha(ready ? 1f : 0.5f);
+        boolean canSendFile = ready && !core.onlinePeersSnapshot().isEmpty();
+        sendFileButton.setEnabled(canSendFile);
+        sendFileButton.setAlpha(canSendFile ? 1f : 0.4f);
+
+        renderDevices(ready);
+        renderNearby(ready);
+        renderRequests();
+        renderTransfers();
+        renderHistory(ready);
+        renderFiles(ready);
+        if (settings != null && settings.isShowing()) settings.refresh();
     }
 
-    private void renderDevices(SyncCore core) {
-        deviceList.removeAllViews();
-        List<String[]> paired = core.pairedSnapshot();
-        List<String[]> online = core.onlinePeersSnapshot();
-        for (String[] p : paired) {
-            boolean isOnline = false;
-            for (String[] o : online) if (o[0].equals(p[0])) isOnline = true;
-            deviceList.addView(deviceRow(p[0], p[1], isOnline));
+    // ---- 设备头像 ----
+
+    private void renderDevices(boolean ready) {
+        devicesBox.removeAllViews();
+        LinearLayout row = null;
+        int column = 0;
+        java.util.ArrayList<View> cells = new java.util.ArrayList<>();
+        if (ready) {
+            List<String[]> online = core.onlinePeersSnapshot();
+            java.util.ArrayList<View> offlineCells = new java.util.ArrayList<>();
+            for (String[] p : core.pairedSnapshot()) {
+                boolean isOnline = false;
+                for (String[] o : online) if (o[0].equals(p[0])) isOnline = true;
+                // 在线优先,各自保持原有顺序
+                (isOnline ? cells : offlineCells).add(deviceCell(p[0], p[1], isOnline));
+            }
+            cells.addAll(offlineCells);
         }
-        if (paired.isEmpty()) deviceList.addView(emptyHint("暂无已配对设备,从「附近的设备」发起配对"));
+        cells.add(pairCell(ready));
+        for (View cell : cells) {
+            if (column == 0) {
+                row = new LinearLayout(this);
+                row.setOrientation(LinearLayout.HORIZONTAL);
+                devicesBox.addView(row, PanelUi.matchWrap(this, devicesBox.getChildCount() == 0 ? 0 : 18));
+            }
+            row.addView(cell, PanelUi.weight1());
+            column = (column + 1) % 3;
+        }
+        // 补齐最后一行,保持三列等宽
+        while (column != 0 && row != null) {
+            row.addView(new View(this), PanelUi.weight1());
+            column = (column + 1) % 3;
+        }
+        if (ready && core.pairedSnapshot().isEmpty()) {
+            devicesBox.addView(PanelUi.text(this, "还没有配对的设备。点 + 查找附近的设备。", 13, TEXT_SECONDARY),
+                    PanelUi.matchWrap(this, 12));
+        }
     }
 
-    private View deviceRow(String fp, String name, boolean isOnline) {
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.CENTER_VERTICAL);
-        row.setMinimumHeight(dp(48));
-        row.setBackgroundResource(R.drawable.bg_panel);
-        row.setPadding(dp(10), dp(6), dp(6), dp(6));
-        LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        rowLp.topMargin = dp(6);
-        row.setLayoutParams(rowLp);
+    private View deviceCell(String fp, String name, boolean online) {
+        LinearLayout cell = new LinearLayout(this);
+        cell.setOrientation(LinearLayout.VERTICAL);
+        cell.setGravity(Gravity.CENTER_HORIZONTAL);
+        cell.setPadding(0, PanelUi.dp(this, 4), 0, PanelUi.dp(this, 4));
+        cell.setBackground(PanelUi.pressable(this, 0, 16));
 
-        View dot = new View(this);
-        GradientDrawable dotBg = new GradientDrawable();
-        dotBg.setShape(GradientDrawable.OVAL);
-        dotBg.setColor(isOnline ? color(R.color.colorLime) : color(R.color.colorTextSecondary));
-        dot.setBackground(dotBg);
-        row.addView(dot, new LinearLayout.LayoutParams(dp(8), dp(8)));
-
-        TextView tv = new TextView(this);
-        tv.setText(String.format(Locale.US, "%s\n%s", name, fp.substring(0, 8)));
-        tv.setTextColor(color(R.color.colorTextPrimary));
-        tv.setTextSize(13);
-        tv.setLineSpacing(0, 0.9f);
-        LinearLayout.LayoutParams tvLp = new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        tvLp.leftMargin = dp(10);
-        row.addView(tv, tvLp);
-
-        TextView status = new TextView(this);
-        status.setText(isOnline ? "● 在线" : "○ 离线");
-        status.setTextSize(11);
-        status.setFontFeatureSettings("tnum");
-        status.setTextColor(color(isOnline ? R.color.colorLime : R.color.colorTextSecondary));
-        status.setPadding(dp(6), 0, dp(6), 0);
-        row.addView(status);
-
-        if (isOnline) {
-            row.addView(miniButton("发文件", v -> pickFile(fp)));
-        }
+        cell.addView(PanelUi.avatar(this, name, online, 76));
+        TextView title = PanelUi.singleLine(PanelUi.text(this, name, 13, online ? TEXT : TEXT_SECONDARY),
+                TextUtils.TruncateAt.END);
+        title.setGravity(Gravity.CENTER);
+        cell.addView(title, PanelUi.matchWrap(this, 8));
         boolean trusted = core != null && core.isFileTrusted(fp);
-        row.addView(miniButton(trusted ? "文件:自动收" : "文件:需确认", v -> {
-            if (core == null) return;
-            core.setFileTrust(fp, !trusted);
-            log(!trusted ? "已开启自动接收:" + name : name + " 的文件将先询问");
-        }));
-        row.addView(miniButton("取消配对", v -> {
-            if (core != null) core.removePaired(fp);
-            log("已取消配对 " + name);
-        }));
-        return row;
+        TextView status = PanelUi.singleLine(PanelUi.text(this,
+                online ? (trusted ? "在线" : "在线 · 文件需确认") : "离线", 11, TEXT_SECONDARY),
+                TextUtils.TruncateAt.END);
+        status.setGravity(Gravity.CENTER);
+        cell.addView(status, PanelUi.matchWrap(this, 2));
+
+        cell.setContentDescription(name + "，" + (online ? "在线，点按发送文件，长按更多操作" : "离线，长按更多操作"));
+        cell.setOnClickListener(v -> {
+            if (online) pickFile(fp);
+            else toast(name + " 当前离线");
+        });
+        cell.setOnLongClickListener(v -> {
+            showDeviceMenu(v, fp, name, online);
+            return true;
+        });
+        return cell;
     }
 
-    private void renderNearby(SyncCore core) {
-        nearbyList.removeAllViews();
+    private void showDeviceMenu(View anchor, String fp, String name, boolean online) {
+        if (core == null) return;
+        PopupMenu menu = new PopupMenu(this, anchor);
+        if (online) menu.getMenu().add(0, 1, 0, "发送文件…");
+        MenuItem trust = menu.getMenu().add(0, 2, 1, "自动接收文件");
+        trust.setCheckable(true);
+        trust.setChecked(core.isFileTrusted(fp));
+        menu.getMenu().add(0, 3, 2, "移除此设备…");
+        menu.setOnMenuItemClickListener(item -> {
+            switch (item.getItemId()) {
+                case 1: pickFile(fp); break;
+                case 2:
+                    boolean next = !core.isFileTrusted(fp);
+                    core.setFileTrust(fp, next);
+                    log(next ? "已开启自动接收：" + name : name + " 的文件将先询问");
+                    break;
+                case 3: confirmRemove(fp, name); break;
+            }
+            return true;
+        });
+        menu.show();
+    }
+
+    private View pairCell(boolean ready) {
+        LinearLayout cell = new LinearLayout(this);
+        cell.setOrientation(LinearLayout.VERTICAL);
+        cell.setGravity(Gravity.CENTER_HORIZONTAL);
+        cell.setPadding(0, PanelUi.dp(this, 4), 0, PanelUi.dp(this, 4));
+        cell.setBackground(PanelUi.pressable(this, 0, 16));
+
+        FrameLayout ring = new FrameLayout(this);
+        ring.setBackground(PanelUi.dashedCircle(this, showNearby ? ACCENT : TEXT_SECONDARY));
+        ImageView plus = new ImageView(this);
+        plus.setImageResource(showNearby ? R.drawable.ic_close : R.drawable.ic_plus);
+        plus.setImageTintList(ColorStateList.valueOf(TEXT_SECONDARY));
+        int iconSize = PanelUi.dp(this, 26);
+        ring.addView(plus, new FrameLayout.LayoutParams(iconSize, iconSize, Gravity.CENTER));
+        cell.addView(ring, new LinearLayout.LayoutParams(PanelUi.dp(this, 76), PanelUi.dp(this, 76)));
+        TextView label = PanelUi.text(this, "配对", 13, TEXT_SECONDARY);
+        label.setGravity(Gravity.CENTER);
+        cell.addView(label, PanelUi.matchWrap(this, 8));
+
+        cell.setContentDescription(showNearby ? "收起附近的设备" : "配对新设备");
+        cell.setEnabled(ready);
+        cell.setOnClickListener(v -> {
+            showNearby = !showNearby;
+            if (showNearby && core != null) core.refreshDiscovery();
+            renderAll();
+        });
+        return cell;
+    }
+
+    // ---- 附近的设备 ----
+
+    private void renderNearby(boolean ready) {
+        nearbyBox.removeAllViews();
+        if (!showNearby || !ready) {
+            nearbyBox.setVisibility(View.GONE);
+            return;
+        }
+        nearbyBox.setVisibility(View.VISIBLE);
+        nearbyBox.addView(PanelUi.sectionTitle(this, "附近的设备"));
         List<String[]> nearby = core.nearbySnapshot();
+        if (nearby.isEmpty()) {
+            nearbyBox.addView(PanelUi.text(this, "没有发现新设备。确认对方已打开 ProtoSync 且在同一网络。", 13, TEXT_SECONDARY));
+        }
         for (String[] d : nearby) {
+            String serviceName = d[0];
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.setMinimumHeight(dp(48));
-            row.setBackgroundResource(R.drawable.bg_panel);
-            row.setPadding(dp(10), dp(6), dp(6), dp(6));
-            LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-            rowLp.topMargin = dp(6);
-            row.setLayoutParams(rowLp);
-
-            TextView tv = new TextView(this);
-            tv.setText(String.format(Locale.US, "%s\n%s:%s", d[0], d[1], d[2]));
-            tv.setTextColor(color(R.color.colorTextPrimary));
-            tv.setTextSize(12);
-            LinearLayout.LayoutParams tvLp = new LinearLayout.LayoutParams(
-                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-            tvLp.leftMargin = dp(2);
-            row.addView(tv, tvLp);
-            row.addView(miniButton("配对", v -> { if (core != null) core.pairWithNearby(d[0]); }));
-            nearbyList.addView(row);
-        }
-        if (nearby.isEmpty()) nearbyList.addView(emptyHint("暂无,点 SCAN 刷新;或用诊断区手动连接"));
-    }
-
-    private void renderActivity(SyncCore core) {
-        activityList.removeAllViews();
-        List<SyncCore.ActivityItem> items = core.activitySnapshot();
-        SimpleDateFormat fmt = new SimpleDateFormat("HH:mm:ss", Locale.US);
-        for (SyncCore.ActivityItem item : items) {
-            LinearLayout row = new LinearLayout(this);
-            row.setOrientation(LinearLayout.HORIZONTAL);
-            row.setPadding(dp(4), dp(6), dp(4), dp(6));
-
-            TextView arrow = new TextView(this);
-            arrow.setText(item.incoming ? "↓" : "↑");
-            arrow.setTextSize(13);
-            arrow.setTypeface(null, android.graphics.Typeface.BOLD);
-            arrow.setTextColor(color(item.failed ? R.color.colorCoral
-                    : item.incoming ? R.color.colorCyan : R.color.colorLime));
-            row.addView(arrow);
-
-            TextView body = new TextView(this);
-            String preview = item.title.length() > 40 ? item.title.substring(0, 40) + "…" : item.title;
-            body.setText(String.format(Locale.US, "%s · %s\n%s · %s",
-                    kindLabel(item.kind), preview, item.detail, fmt.format(new Date(item.time))));
-            body.setTextSize(12);
-            body.setTextColor(color(item.failed ? R.color.colorCoral : R.color.colorTextPrimary));
-            LinearLayout.LayoutParams bodyLp = new LinearLayout.LayoutParams(
-                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-            bodyLp.leftMargin = dp(8);
-            row.addView(body, bodyLp);
-            activityList.addView(row);
-        }
-        if (items.isEmpty()) activityList.addView(emptyHint("暂无流转记录"));
-    }
-
-    private static String kindLabel(String kind) {
-        switch (kind) {
-            case "text": return "文本";
-            case "image": return "图片";
-            case "file": return "文件";
-            default: return "设备";
+            row.setBackground(PanelUi.rounded(this, FILL, 14));
+            row.setPadding(PanelUi.dp(this, 14), PanelUi.dp(this, 8), PanelUi.dp(this, 8), PanelUi.dp(this, 8));
+            TextView name = PanelUi.text(this, "设备 " + serviceName.substring(0, Math.min(8, serviceName.length())), 15, TEXT);
+            name.setFontFeatureSettings("tnum");
+            row.addView(name, PanelUi.weight1());
+            Button pair = PanelUi.primaryButton(this, "配对", 36, 14);
+            pair.setOnClickListener(v -> {
+                if (core != null) core.pairWithNearby(serviceName);
+                log("→ 正在连接 " + serviceName);
+            });
+            row.addView(pair, new LinearLayout.LayoutParams(PanelUi.dp(this, 76), PanelUi.dp(this, 36)));
+            nearbyBox.addView(row, PanelUi.matchWrap(this, nearbyBox.getChildCount() <= 1 ? 0 : 6));
         }
     }
 
-    private View emptyHint(String text) {
-        TextView tv = new TextView(this);
-        tv.setText("  " + text);
-        tv.setTextColor(color(R.color.colorTextSecondary));
-        tv.setTextSize(12);
-        tv.setPadding(0, dp(6), 0, dp(6));
-        return tv;
-    }
+    // ---- 配对请求 / 文件请求(安全决策:卡片常驻,直到决定或失效)----
 
-    private Button miniButton(String label, View.OnClickListener onClick) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setTextSize(11);
-        b.setAllCaps(false);
-        b.setMinimumWidth(dp(48));
-        b.setMinimumHeight(dp(40));
-        b.setTextColor(color(R.color.colorTextPrimary));
-        b.setBackgroundResource(R.drawable.btn_secondary);
-        b.setOnClickListener(onClick);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        lp.leftMargin = dp(4);
-        b.setLayoutParams(lp);
-        return b;
-    }
-
-    // ---- 传输卡 ----
-
-    private void renderTransferCard() {
-        if (transfers.isEmpty()) {
-            transferCard.setVisibility(View.GONE);
+    private void renderRequests() {
+        requestsBox.removeAllViews();
+        if (activePair == null && activeOffer == null) {
+            requestsBox.setVisibility(View.GONE);
             return;
         }
-        TransferUi t = transfers.values().iterator().next();
-        int extra = transfers.size() - 1;
-        transferCard.setVisibility(View.VISIBLE);
-        transferProgressName.setText(t.name);
-        int percent = (int) Math.round(t.fraction * 100);
-        transferProgressPercent.setText(percent + "%");
-        transferMoreLabel.setText(extra > 0 ? ("另有 " + extra + " 个任务进行中") : "");
-        transferMoreLabel.setVisibility(extra > 0 ? View.VISIBLE : View.GONE);
-
-        int cyan = color(R.color.colorCyan), lime = color(R.color.colorLime);
-        int coral = color(R.color.colorCoral), text = color(R.color.colorTextPrimary);
-        switch (t.state) {
-            case "done":
-                transferTrack.update(1f, TransferTrackView.State.DONE, cyan, lime, coral, text);
-                transferProgressPercent.setText("✓");
-                transferProgressPercent.setTextColor(lime);
-                break;
-            case "failed":
-                transferTrack.update((float) t.fraction, TransferTrackView.State.FAILED, cyan, lime, coral, text);
-                transferProgressPercent.setTextColor(coral);
-                break;
-            default:
-                transferTrack.update((float) t.fraction, TransferTrackView.State.SYNCING, cyan, lime, coral, text);
-                transferProgressPercent.setTextColor(text);
+        requestsBox.setVisibility(View.VISIBLE);
+        if (activePair != null) requestsBox.addView(pairingCard(activePair[0], activePair[1]));
+        if (activeOffer != null) {
+            requestsBox.addView(offerCard(activeOffer), PanelUi.matchWrap(this, activePair != null ? 12 : 0));
         }
     }
 
-    private void scheduleTransferRemoval(final String id, long delayMs) {
-        ui.postDelayed(() -> {
-            transfers.remove(id);
-            renderTransferCard();
-        }, delayMs);
+    private LinearLayout card() {
+        LinearLayout card = new LinearLayout(this);
+        card.setOrientation(LinearLayout.VERTICAL);
+        card.setBackground(PanelUi.rounded(this, FILL, 16));
+        int pad = PanelUi.dp(this, 16);
+        card.setPadding(pad, pad, pad, pad);
+        return card;
     }
 
-    // ---- SyncService.Ui(主线程回调)----
-
-    @Override public void onLog(String line) { log(line); }
-
-    @Override public void onPeerConnected(String name, String fp) {
-        toast("已连接 " + name);
-        refreshEngine();
+    private View pairingCard(String name, String fp) {
+        LinearLayout card = card();
+        card.addView(PanelUi.bold(this, "「" + name + "」请求配对", 15, TEXT));
+        TextView code = PanelUi.text(this, PanelUi.shortFp(fp), 28, TEXT);
+        code.setFontFeatureSettings("tnum");
+        card.addView(code, PanelUi.matchWrap(this, 10));
+        card.addView(PanelUi.text(this, "确认对方屏幕上显示同一指纹后再接受。", 13, TEXT_SECONDARY),
+                PanelUi.matchWrap(this, 6));
+        card.addView(buttonPair("接受", v -> decidePair(fp, true), "拒绝", v -> decidePair(fp, false)),
+                PanelUi.matchWrap(this, 14));
+        return card;
     }
 
-    @Override public void onPeerDisconnected(String fp, String reason) {
-        refreshEngine();
+    private View offerCard(OfferUi offer) {
+        LinearLayout card = card();
+        TextView title = PanelUi.text(this, "「" + offer.fromName + "」想发送「" + offer.name + "」", 15, TEXT);
+        title.setMaxLines(2);
+        title.setEllipsize(TextUtils.TruncateAt.MIDDLE);
+        card.addView(title);
+        card.addView(PanelUi.text(this, android.text.format.Formatter.formatShortFileSize(this, offer.size),
+                13, TEXT_SECONDARY), PanelUi.matchWrap(this, 4));
+        card.addView(buttonPair("接收", v -> decideOffer(offer.id, true, false),
+                "拒绝", v -> decideOffer(offer.id, false, false)), PanelUi.matchWrap(this, 14));
+        card.addView(PanelUi.linkButton(this, "接收，并始终信任此设备的文件", ACCENT,
+                v -> decideOffer(offer.id, true, true)), PanelUi.matchWrap(this, 4));
+        return card;
     }
 
-    @Override public void onPairingRequested(String name, String fp) {
-        // 安全决策,不是普通 Toast(§9.3):名称 + 短指纹,SAS 码协议落地前不假装有(§12)
-        if (pairingDialog != null) pairingDialog.dismiss();
-        pairingDialog = new android.app.AlertDialog.Builder(this)
-                .setTitle("配对请求")
-                .setMessage("设备「" + name + "」请求配对\n\n指纹 " + fp.substring(0, Math.min(8, fp.length()))
-                        + "\n\n请核对两台设备显示的指纹一致后再接受。")
-                .setPositiveButton("接受", (d, w) -> { if (svc != null) svc.decidePairing(fp, true); })
-                .setNegativeButton("拒绝", (d, w) -> { if (svc != null) svc.decidePairing(fp, false); })
-                .setOnCancelListener(d -> { if (svc != null) svc.decidePairing(fp, false); })
-                .show();
+    private View buttonPair(String primary, View.OnClickListener onPrimary,
+                            String secondary, View.OnClickListener onSecondary) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        Button a = PanelUi.primaryButton(this, primary, 44, 15);
+        a.setOnClickListener(onPrimary);
+        Button b = PanelUi.secondaryButton(this, secondary, 44, 15);
+        b.setOnClickListener(onSecondary);
+        row.addView(a, new LinearLayout.LayoutParams(0, PanelUi.dp(this, 44), 1f));
+        LinearLayout.LayoutParams bLp = new LinearLayout.LayoutParams(0, PanelUi.dp(this, 44), 1f);
+        bLp.leftMargin = PanelUi.dp(this, 10);
+        row.addView(b, bLp);
+        return row;
     }
 
-    @Override public void onFileOfferRequested(String id, String name, long size, String fromName, String fromFp) {
-        if (fileOfferDialog != null) fileOfferDialog.dismiss();
-        fileOfferDialogId = id;
-        fileOfferDialog = new android.app.AlertDialog.Builder(this)
-                .setTitle("文件请求")
-                .setMessage("「" + fromName + "」想发送文件\n\n" + name + "\n"
-                        + android.text.format.Formatter.formatShortFileSize(this, size))
-                .setPositiveButton("接收", (d, w) -> decideOffer(id, true, false))
-                .setNegativeButton("拒绝", (d, w) -> decideOffer(id, false, false))
-                .setNeutralButton("始终接收", (d, w) -> decideOffer(id, true, true))
-                .setOnCancelListener(d -> decideOffer(id, false, false))
-                .show();
+    private void decidePair(String fp, boolean accept) {
+        activePair = null;
+        renderRequests();
+        if (svc != null) svc.decidePairing(fp, accept);
     }
 
     private void decideOffer(String id, boolean accept, boolean alwaysTrust) {
-        if (id.equals(fileOfferDialogId)) { fileOfferDialogId = null; fileOfferDialog = null; }
+        if (activeOffer != null && activeOffer.id.equals(id)) activeOffer = null;
+        renderRequests();
         if (svc != null) svc.decideFileOffer(id, accept, alwaysTrust);
+        if (!accept) log("已拒绝文件请求");
     }
 
-    @Override public void onFileOfferExpired(String id) {
-        if (id.equals(fileOfferDialogId) && fileOfferDialog != null) {
-            fileOfferDialogId = null;
-            fileOfferDialog.setOnCancelListener(null);
-            fileOfferDialog.dismiss();
-            fileOfferDialog = null;
-            toast("文件请求已超时");
+    // ---- 传输 ----
+
+    private void renderTransfers() {
+        transfersBox.removeAllViews();
+        transfersBox.setVisibility(transfers.isEmpty() ? View.GONE : View.VISIBLE);
+        for (TransferUi t : transfers.values()) {
+            LinearLayout line = new LinearLayout(this);
+            line.setOrientation(LinearLayout.HORIZONTAL);
+            line.setGravity(Gravity.CENTER_VERTICAL);
+            TextView arrow = PanelUi.bold(this, t.incoming ? "↓" : "↑", 13, TEXT_SECONDARY);
+            line.addView(arrow);
+            TextView name = PanelUi.singleLine(PanelUi.text(this, t.name, 14, TEXT), TextUtils.TruncateAt.MIDDLE);
+            LinearLayout.LayoutParams nameLp = PanelUi.weight1();
+            nameLp.leftMargin = PanelUi.dp(this, 6);
+            line.addView(name, nameLp);
+            String right;
+            int rightColor = TEXT_SECONDARY;
+            switch (t.state) {
+                case "done": right = "已完成"; rightColor = ACCENT; break;
+                case "failed": right = "失败"; rightColor = CORAL; break;
+                case "waiting": right = "等待对方确认"; break;
+                default: right = Math.round(t.fraction * 100) + "%";
+            }
+            TextView pct = PanelUi.text(this, right, 13, rightColor);
+            pct.setFontFeatureSettings("tnum");
+            line.addView(pct);
+            transfersBox.addView(line, PanelUi.matchWrap(this, transfersBox.getChildCount() == 0 ? 0 : 12));
+            transfersBox.addView(PanelUi.progressBar(this, t.fraction, "failed".equals(t.state)));
+            ((LinearLayout.LayoutParams) transfersBox.getChildAt(transfersBox.getChildCount() - 1)
+                    .getLayoutParams()).topMargin = PanelUi.dp(this, 6);
         }
     }
 
-    @Override public void onClipboardText(String text) {
-        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-        cm.setPrimaryClip(ClipData.newPlainText("protosync", text));
-        toast("收到文本,已进剪贴板");
+    // ---- 剪贴板历史 ----
+
+    private void renderHistory(boolean ready) {
+        historyBox.removeAllViews();
+        List<SyncCore.ClipItem> items = ready ? core.clipHistorySnapshot() : java.util.Collections.emptyList();
+        LinearLayout header = new LinearLayout(this);
+        header.setOrientation(LinearLayout.HORIZONTAL);
+        header.addView(PanelUi.sectionTitle(this, "剪贴板历史"), PanelUi.weight1());
+        if (!items.isEmpty()) header.addView(PanelUi.text(this, "点按即复制", 12, TEXT_SECONDARY));
+        historyBox.addView(header);
+        if (items.isEmpty()) {
+            historyBox.addView(PanelUi.text(this, "收到或发出的剪贴板会出现在这里。", 13, TEXT_SECONDARY));
+            return;
+        }
+        SimpleDateFormat fmt = new SimpleDateFormat("HH:mm", Locale.US);
+        for (SyncCore.ClipItem item : items) {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setBackground(PanelUi.pressable(this, FILL, 14));
+            row.setPadding(PanelUi.dp(this, 14), PanelUi.dp(this, 11), PanelUi.dp(this, 14), PanelUi.dp(this, 11));
+            if (item.png != null) {
+                Bitmap thumb = thumbnail(item);
+                if (thumb != null) {
+                    ImageView iv = new ImageView(this);
+                    iv.setImageBitmap(thumb);
+                    iv.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                    iv.setClipToOutline(true);
+                    iv.setBackground(PanelUi.rounded(this, FILL, 6));
+                    LinearLayout.LayoutParams ivLp = new LinearLayout.LayoutParams(PanelUi.dp(this, 36), PanelUi.dp(this, 36));
+                    ivLp.rightMargin = PanelUi.dp(this, 12);
+                    row.addView(iv, ivLp);
+                }
+            }
+            LinearLayout texts = new LinearLayout(this);
+            texts.setOrientation(LinearLayout.VERTICAL);
+            String preview = preview(item);
+            texts.addView(PanelUi.singleLine(PanelUi.text(this, preview, 15, TEXT), TextUtils.TruncateAt.END));
+            texts.addView(PanelUi.text(this, item.source + " · " + fmt.format(new Date(item.time)), 12, TEXT_SECONDARY),
+                    PanelUi.matchWrap(this, 3));
+            row.addView(texts, PanelUi.weight1());
+            row.setContentDescription("复制：" + preview);
+            row.setOnClickListener(v -> {
+                if (item.text != null) writeTextToClipboard(item.text, "已复制");
+                else if (item.png != null) writeImageToClipboard(item.png, "已复制");
+            });
+            historyBox.addView(row, PanelUi.matchWrap(this, 6));
+        }
     }
 
-    @Override public void onClipboardImage(byte[] png) {
+    private String preview(SyncCore.ClipItem item) {
+        if (item.text != null) return item.text.replace('\n', ' ');
+        thumbnail(item);
+        int[] size = originalSizes.get(item);
+        return size == null ? "图片" : "图片 · " + size[0] + "×" + size[1];
+    }
+
+    /** 解码一次后缓存;缩略图按需降采样,避免大图占内存。原图宽高另存,供预览文字使用 */
+    private Bitmap thumbnail(SyncCore.ClipItem item) {
+        if (thumbs.containsKey(item)) return thumbs.get(item);
+        Bitmap b = null;
+        try {
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeByteArray(item.png, 0, item.png.length, bounds);
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inSampleSize = Math.max(1, Math.min(bounds.outWidth, bounds.outHeight) / 128);
+            b = BitmapFactory.decodeByteArray(item.png, 0, item.png.length, opts);
+            if (b != null) originalSizes.put(item, new int[]{bounds.outWidth, bounds.outHeight});
+        } catch (Exception ignored) {}
+        thumbs.put(item, b);
+        return b;
+    }
+
+    // ---- 收到的文件 ----
+
+    private void renderFiles(boolean ready) {
+        filesBox.removeAllViews();
+        filesBox.addView(PanelUi.sectionTitle(this, "收到的文件"));
+        List<SyncCore.ReceivedFile> files = ready ? core.recentFilesSnapshot() : java.util.Collections.emptyList();
+        if (files.isEmpty()) {
+            filesBox.addView(PanelUi.text(this, "收到的文件保存在“下载/ProtoSync”。", 13, TEXT_SECONDARY));
+            return;
+        }
+        for (SyncCore.ReceivedFile f : files) {
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setMinimumHeight(PanelUi.dp(this, 48));
+            row.setBackground(PanelUi.pressable(this, FILL, 14));
+            row.setPadding(PanelUi.dp(this, 14), 0, PanelUi.dp(this, 14), 0);
+            ImageView icon = new ImageView(this);
+            icon.setImageResource(R.drawable.ic_file);
+            icon.setImageTintList(ColorStateList.valueOf(TEXT_SECONDARY));
+            row.addView(icon, new LinearLayout.LayoutParams(PanelUi.dp(this, 18), PanelUi.dp(this, 18)));
+            TextView name = PanelUi.singleLine(PanelUi.text(this, f.name, 15, TEXT), TextUtils.TruncateAt.MIDDLE);
+            LinearLayout.LayoutParams nameLp = PanelUi.weight1();
+            nameLp.leftMargin = PanelUi.dp(this, 10);
+            row.addView(name, nameLp);
+            row.setContentDescription("打开 " + f.name);
+            row.setOnClickListener(v -> openReceived(f));
+            filesBox.addView(row, PanelUi.matchWrap(this, 6));
+        }
+    }
+
+    private void openReceived(SyncCore.ReceivedFile f) {
+        if (f.uri == null) { toast("已保存到 " + f.path); return; }
+        try {
+            Intent view = new Intent(Intent.ACTION_VIEW);
+            android.net.Uri uri = android.net.Uri.parse(f.uri);
+            view.setDataAndType(uri, getContentResolver().getType(uri));
+            view.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(Intent.createChooser(view, f.name));
+        } catch (Exception e) {
+            toast("无法打开：" + e.getMessage());
+        }
+    }
+
+    // ================= 剪贴板写入 =================
+
+    private void writeTextToClipboard(String text, String toastText) {
+        ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        cm.setPrimaryClip(ClipData.newPlainText("protosync", text));
+        toast(toastText);
+    }
+
+    /** 图片进剪贴板需要 content URI:API 29+ 写入 MediaStore 图片目录,否则落盘并告知路径 */
+    private void writeImageToClipboard(byte[] png, String toastText) {
         if (Build.VERSION.SDK_INT >= 29) {
             android.net.Uri uri = null;
             try {
@@ -582,14 +729,14 @@ public class MainActivity extends Activity implements SyncService.Ui {
                     getContentResolver().update(uri, pub, null, null);
                     ClipboardManager cm = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
                     cm.setPrimaryClip(ClipData.newUri(getContentResolver(), "protosync", uri));
-                    toast("收到图片,已进剪贴板");
+                    toast(toastText);
                     return;
                 }
             } catch (Exception e) {
                 if (uri != null) {
                     try { getContentResolver().delete(uri, null, null); } catch (Exception ignored) {}
                 }
-                log("图片进剪贴板失败: " + e.getMessage());
+                log("图片进剪贴板失败：" + e.getMessage());
             }
         }
         // API 28 或 MediaStore 失败:落盘并告知路径
@@ -600,18 +747,64 @@ public class MainActivity extends Activity implements SyncService.Ui {
             try (FileOutputStream fos = new FileOutputStream(out)) {
                 fos.write(png);
             }
-            toast("收到图片,已保存 " + out.getAbsolutePath());
+            toast("图片已保存 " + out.getAbsolutePath());
         } catch (Exception e) {
-            toast("收到图片,但保存失败");
+            toast("图片保存失败");
         }
+    }
+
+    // ================= SyncService.Ui(主线程回调)=================
+
+    @Override public void onLog(String line) { log(line); }
+
+    @Override public void onPeerConnected(String name, String fp) {
+        // 配对可能由对端接受驱动完成:卡片随之收起
+        if (activePair != null && activePair[1].equals(fp)) activePair = null;
+        toast("已连接 " + name);
+        renderAll();
+    }
+
+    @Override public void onPeerDisconnected(String fp, String reason) {
+        renderAll();
+    }
+
+    @Override public void onPairingRequested(String name, String fp) {
+        activePair = new String[]{name, fp};
+        renderRequests();
+    }
+
+    @Override public void onFileOfferRequested(String id, String name, long size, String fromName, String fromFp) {
+        OfferUi o = new OfferUi();
+        o.id = id;
+        o.name = name;
+        o.size = size;
+        o.fromName = fromName;
+        activeOffer = o;
+        renderRequests();
+    }
+
+    @Override public void onFileOfferExpired(String id) {
+        if (activeOffer != null && activeOffer.id.equals(id)) {
+            activeOffer = null;
+            renderRequests();
+            toast("文件请求已超时");
+        }
+    }
+
+    @Override public void onClipboardText(String text) {
+        writeTextToClipboard(text, "收到文本，已进剪贴板");
+    }
+
+    @Override public void onClipboardImage(byte[] png) {
+        writeImageToClipboard(png, "收到图片，已进剪贴板");
     }
 
     @Override public void onClipboardResult(boolean ok, String detail) {
         toast(detail);
-        if (core != null) refreshEngine();
+        renderAll();
     }
 
-    @Override public void onStateChanged() { refreshEngine(); }
+    @Override public void onStateChanged() { renderAll(); }
 
     @Override public void onTransferStarted(String id, String name, boolean incoming) {
         TransferUi t = new TransferUi();
@@ -620,14 +813,15 @@ public class MainActivity extends Activity implements SyncService.Ui {
         t.incoming = incoming;
         t.state = "syncing";
         transfers.put(id, t);
-        renderTransferCard();
+        renderTransfers();
     }
 
     @Override public void onTransferProgress(String id, String name, double fraction, boolean incoming) {
         TransferUi t = transfers.get(id);
         if (t == null) return;
         t.fraction = fraction;
-        renderTransferCard();
+        if ("waiting".equals(t.state) && fraction > 0) t.state = "syncing";
+        renderTransfers();
     }
 
     @Override public void onTransferFinished(String id, String name, boolean ok, String error,
@@ -636,38 +830,52 @@ public class MainActivity extends Activity implements SyncService.Ui {
         if (t != null) {
             t.state = ok ? "done" : "failed";
             t.fraction = ok ? 1f : t.fraction;
-            renderTransferCard();
+            renderTransfers();
             scheduleTransferRemoval(id, ok ? 2500 : 4000);
         }
-        if (error != null && id.isEmpty()) toast("发送失败: " + error); // 未注册任务的前置失败
+        if (error != null && id.isEmpty()) toast("发送失败：" + error); // 未注册任务的前置失败
+        if (ok && incoming) renderFiles(core != null);
+    }
+
+    private void scheduleTransferRemoval(final String id, long delayMs) {
+        ui.postDelayed(() -> {
+            transfers.remove(id);
+            renderTransfers();
+        }, delayMs);
     }
 
     @Override public void onActivityChanged() {
-        if (core != null) renderActivity(core);
+        // 活动日志变化意味着剪贴板历史 / 传输状态可能变了;等待确认的发送在这里体现
+        if (core != null) {
+            for (SyncCore.ActivityItem item : core.activitySnapshot()) {
+                if ("file".equals(item.kind) && !item.incoming && "等待对方确认…".equals(item.detail)) {
+                    for (Map.Entry<String, TransferUi> e : transfers.entrySet()) {
+                        TransferUi t = e.getValue();
+                        if (!t.incoming && t.name.equals(item.title) && "syncing".equals(t.state) && t.fraction == 0) {
+                            t.state = "waiting";
+                        }
+                    }
+                }
+                break; // 只看最新一条
+            }
+        }
+        renderTransfers();
+        renderHistory(core != null && core.fingerprint().length() >= 8);
     }
 
-    // ---- 工具 ----
+    // ================= 工具 =================
 
-    private void log(String line) {
+    void log(String line) {
         android.util.Log.d("ProtoSyncUI", line);
         ui.post(() -> {
             String stamp = android.text.format.DateFormat.format("HH:mm:ss", new Date()).toString();
             logBuf.insert(0, "[" + stamp + "] " + line + "\n");
             if (logBuf.length() > 8000) logBuf.setLength(8000);
-            logView.setText(logBuf.toString());
-            if (core != null) refreshEngine();
+            if (settings != null && settings.isShowing()) settings.refreshLog();
         });
     }
 
-    private void toast(String s) {
+    void toast(String s) {
         ui.post(() -> Toast.makeText(this, s, Toast.LENGTH_SHORT).show());
-    }
-
-    private int color(int resId) {
-        return getResources().getColor(resId, getTheme());
-    }
-
-    private int dp(int v) {
-        return (int) (v * getResources().getDisplayMetrics().density);
     }
 }

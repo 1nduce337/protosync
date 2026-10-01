@@ -72,7 +72,14 @@ A single dark screen following the B-iPhone mockup:
 
 The gear opens a settings sheet with the fingerprint, per-device 自动接收文件 toggles (swipe to remove) and the log.
 
+## Android
+
+The same single dark screen as iOS, built in plain Java views (no Gradle):
+- `PanelUi.java` holds the tokens and builders, mirroring `PanelStyle.swift`.
+- Avatars are 76 dp: tap to send a file, long-press for 自动接收文件 / 移除.
+- Pairing and file requests are inline cards, not dialogs.
+- The gear opens a full-screen settings sheet: this device, auto-receive switches, manual connect, log.
+
 ## Not done yet
 
-- Android: the same layout in the existing plain-Java views.
 - Show the target device on the transfer line (transfer events don't carry the peer yet).

@@ -80,6 +80,38 @@ public final class SyncCore {
         }
     }
 
+    /** 剪贴板历史条目:只在内存里,不落盘。text 与 png 二选一。 */
+    public static class ClipItem {
+        public static final String LOCAL_SOURCE = "这台设备";
+        public final long time = System.currentTimeMillis();
+        public final String text;
+        public final byte[] png;
+        public final String source;
+
+        ClipItem(String text, byte[] png, String source) {
+            this.text = text;
+            this.png = png;
+            this.source = source;
+        }
+    }
+
+    /** 本次运行收到的文件(只在内存里;文件本身在 下载/ProtoSync)。 */
+    public static class ReceivedFile {
+        public final long time = System.currentTimeMillis();
+        public final String name;
+        public final String path;
+        public final String uri;   // MediaStore content URI,可为 null
+
+        ReceivedFile(String name, String path, String uri) {
+            this.name = name;
+            this.path = path;
+            this.uri = uri;
+        }
+    }
+
+    public static final int CLIP_HISTORY_LIMIT = 6;
+    public static final int RECENT_FILES_LIMIT = 5;
+
     // ================= 基础设施 =================
 
     private final Context context;
@@ -107,6 +139,8 @@ public final class SyncCore {
     private final Map<String, Long> dialBlockedUntil = new HashMap<>();      // fp → 拉黑截止时间
     private final Map<String, String> pairingNames = new HashMap<>();        // 配对请求队列中的 fp → 设备名
     private final ArrayDeque<ActivityItem> activityLog = new ArrayDeque<>();
+    private final ArrayDeque<ClipItem> clipHistory = new ArrayDeque<>();
+    private final ArrayDeque<ReceivedFile> recentFiles = new ArrayDeque<>();
     private String myName;
 
     // ================= 生命周期 =================
@@ -231,6 +265,21 @@ public final class SyncCore {
         return new ArrayList<>(activityLog);
     }
 
+    public List<ClipItem> clipHistorySnapshot() {
+        synchronized (clipHistory) { return new ArrayList<>(clipHistory); }
+    }
+
+    public List<ReceivedFile> recentFilesSnapshot() {
+        synchronized (recentFiles) { return new ArrayList<>(recentFiles); }
+    }
+
+    private void recordClip(ClipItem item) {
+        synchronized (clipHistory) {
+            clipHistory.addFirst(item);
+            while (clipHistory.size() > CLIP_HISTORY_LIMIT) clipHistory.removeLast();
+        }
+    }
+
     // ================= 动作 API(任意线程,只投递)=================
 
     public void refreshDiscovery() {
@@ -339,14 +388,16 @@ public final class SyncCore {
      */
     public void sendClipboardText(String text) {
         runOnEngine(() -> sendClipboard(Protocol.clipboardText(text, Crypto.sha256Hex(
-                text.getBytes(StandardCharsets.UTF_8)), true), text));
+                text.getBytes(StandardCharsets.UTF_8)), true), text,
+                new ClipItem(text, null, ClipItem.LOCAL_SOURCE)));
     }
 
     public void sendClipboardImage(byte[] png) {
-        runOnEngine(() -> sendClipboard(Protocol.clipboardImage(png, Crypto.sha256Hex(png), true), "图片"));
+        runOnEngine(() -> sendClipboard(Protocol.clipboardImage(png, Crypto.sha256Hex(png), true), "图片",
+                new ClipItem(null, png, ClipItem.LOCAL_SOURCE)));
     }
 
-    private void sendClipboard(Protocol.Msg m, String preview) {
+    private void sendClipboard(Protocol.Msg m, String preview, ClipItem item) {
         if (connections.isEmpty()) {
             postEvent(() -> listener.onClipboardResult(false, "没有在线设备"));
             return;
@@ -368,6 +419,7 @@ public final class SyncCore {
                 : "发送失败: " + errors;
         final boolean okFinal = ok;
         final String detailFinal = detail;
+        if (ok) recordClip(item);
         addActivity("text", false, preview, detailFinal, !okFinal);
         postEvent(() -> listener.onClipboardResult(okFinal, detailFinal));
     }
@@ -596,9 +648,11 @@ public final class SyncCore {
                     if (!force && seenHas(hash)) return;
                     seenPut(hash);
                     if ("text".equals(kind)) {
+                        recordClip(new ClipItem(data, null, link.peerName()));
                         addActivity("text", true, data, "已复制到剪贴板", false);
                         postEvent(() -> listener.onClipboardText(data));
                     } else {
+                        recordClip(new ClipItem(null, content, link.peerName()));
                         addActivity("image", true, "图片", "已复制到剪贴板", false);
                         postEvent(() -> listener.onClipboardImage(content));
                     }
@@ -764,6 +818,12 @@ public final class SyncCore {
         }
         @Override public void onTransferFinished(String id, String name, boolean ok, String error,
                                                  boolean incomingDir, String savedPath, String savedUri) {
+            if (ok && incomingDir && savedPath != null) {
+                synchronized (recentFiles) {
+                    recentFiles.addFirst(new ReceivedFile(name, savedPath, savedUri));
+                    while (recentFiles.size() > RECENT_FILES_LIMIT) recentFiles.removeLast();
+                }
+            }
             String detail;
             if (!ok) detail = "失败: " + error;
             else if (incomingDir) detail = "已保存 " + (savedPath != null ? savedPath : "");

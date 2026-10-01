@@ -40,6 +40,16 @@ Design direction B was chosen (spec: `docs/design/MENUBAR_PANEL.md`).
 - ⚠️ **Still to do by hand:** check the settings window and the iOS screen (agent can't click or run the UI).
 - **Then:** Android migration to the same design.
 
+### Round 3 (compiled on the Mac; not checked by hand): settings window polish from the user's screenshots
+
+- **Paired-device rows:** the "自动接收" caption and switch now sit as one trailing column; removal moved into a "⋯" menu per row plus a right-click menu (still confirmed).
+- **Fingerprint:** shows the short 8-character form, with "复制完整指纹"; the full value is in the hover tooltip.
+- **Address:** uses monospaced digits at body size.
+- **Section footers:** small, secondary colour, left-aligned (they rendered right-aligned at body size).
+- **iOS:** the gear button no longer picks up the Lime tint.
+- ✅ **Verified on the Mac (no fixes needed):** `swift build`, `swift run protosync-tests` 45/45, `./scripts/make-app.sh`, `xcodegen generate` + iOS simulator build (unsigned).
+- ⚠️ **Still to do by hand:** take a quick look at the settings window.
+
 ### Round 4 (compiled on the Mac; not checked by hand): settings window in the panel style
 
 The user found the native `Form` too bland, so `SettingsView.swift` was rewritten in the panel's language:
@@ -52,15 +62,34 @@ New small components (`SettingsSection`, `SettingsRow`, `SettingsDivider`, `Pane
 - ✅ **Verified on the Mac (no fixes needed):** `swift build`, `swift run protosync-tests` 45/45, `./scripts/make-app.sh`. iOS not rebuilt this round (no iOS files changed by the round).
 - ⚠️ **Still to do by hand:** open 设备与设置 and look at it.
 
-### Round 3 (compiled on the Mac; not checked by hand): settings window polish from the user's screenshots
+### Round 5 (cloud): Android in the panel style
 
-- **Paired-device rows:** the "自动接收" caption and switch now sit as one trailing column; removal moved into a "⋯" menu per row plus a right-click menu (still confirmed).
-- **Fingerprint:** shows the short 8-character form, with "复制完整指纹"; the full value is in the hover tooltip.
-- **Address:** uses monospaced digits at body size.
-- **Section footers:** small, secondary colour, left-aligned (they rendered right-aligned at body size).
-- **iOS:** the gear button no longer picks up the Lime tint.
-- ✅ **Verified on the Mac (no fixes needed):** `swift build`, `swift run protosync-tests` 45/45, `./scripts/make-app.sh`, `xcodegen generate` + iOS simulator build (unsigned).
-- ⚠️ **Still to do by hand:** take a quick look at the settings window.
+- **Android UI rebuilt to match iOS:**
+  - `MainActivity` rewritten; layout in `res/layout/activity_main.xml`;
+  - new `PanelUi.java` (Java counterpart of `PanelStyle.swift`) and `SettingsDialog.java`;
+  - dark single screen with 76 dp device avatars (tap to send a file, long-press for auto-receive / remove) and the "+" pairing tile;
+  - inline pairing and file-request cards (the old pop-up dialogs are gone);
+  - transfers with thin Lime bars, tap-to-copy clipboard history, recently received files (tap to open), and a pinned "发送剪贴板" bar.
+- **Gear → full-screen settings sheet:**
+  - this device (name, short fingerprint + "复制完整指纹", port);
+  - paired devices with Lime auto-receive switches and remove (confirmed);
+  - manual connect (moved here from the old diagnostics area);
+  - the log.
+- **`SyncCore`:** adds an in-memory clipboard history (last 6, received and sent) and a recent received-files list (last 5).
+- **Removed:**
+  - `TransferTrackView.java`;
+  - the old `bg_panel` / `btn_*` drawables and `values-night/colors.xml`.
+- **New resources:**
+  - vector icons (`ic_phone`, `ic_tablet`, `ic_laptop`, `ic_desktop`, `ic_plus`, `ic_close`, `ic_settings`, `ic_file`);
+  - a 5-colour panel palette in `values/colors.xml`.
+- ✅ **Verified in the cloud:**
+  - the whole Android app compiles against the Android 14 framework (Robolectric `android-all`);
+  - every referenced resource exists;
+  - the protocol harness (v2 handshake, version error, file-approval flow) passes 26/26 against the new build.
+- ⚠️ **Not verified:**
+  - `aapt2` resource compile and the real APK build (no Android SDK in the cloud);
+  - how it looks on a device.
+- **Next on the Mac:** run `./android/build_apk.sh`, install with `adb install -r android/build/ProtoSync-android.apk`, and screenshot the main screen and settings sheet.
 
 ## Folder reorganisation (merged into `main`)
 

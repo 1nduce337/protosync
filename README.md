@@ -37,8 +37,8 @@ ProtoSync 让同一局域网内的设备**自动互相发现**,在两两之间�
 | 后台保活 | ✅ 菜单栏常驻 | —(iOS 前台使用) | ✅ 前台服务 |
 | 收到内容通知 | ✅ | ✅ | ✅ 横幅 + 一键复制 |
 | 结构化活动流 / 收件箱 | ✅ | ✅ | ✅ |
-| 菜单栏面板 / 单屏面板(拖文件到设备头像即发送) | ✅ | ✅ | 🚧 迁移中 |
-| 剪贴板历史(仅内存,点按再次复制) | ✅ | ✅ | 🚧 |
+| 菜单栏面板 / 单屏面板(拖文件到设备头像即发送) | ✅ | ✅ | ✅ |
+| 剪贴板历史(仅内存,点按再次复制) | ✅ | ✅ | ✅ |
 
 > ¹ Android 10+ / iOS 系统限制:剪贴板只能前台手动发送,接收自动。
 > ² 这两端只支持手动发送剪贴板(用户明确操作),不自动读取。
@@ -109,7 +109,7 @@ tools/              开发辅助(非发布产物):UI 设计沙盒、Compose 工�
 ProtoSync 是“需要时才出现”的工具:macOS 上主界面是菜单栏弹出面板,iOS 上是单屏面板——
 一眼看到谁在线,拖一下就发送,需要你决定的事才会出现。深色外观、单一 Lime 强调色、系统字体。
 详见 [docs/design/MENUBAR_PANEL.md](docs/design/MENUBAR_PANEL.md)。
-早期的 Signal Foundry 方向保留在 [docs/design/PROTO_SYNC_VISUAL_DIRECTION.md](docs/design/PROTO_SYNC_VISUAL_DIRECTION.md)(Android 端迁移前仍在使用)。
+早期的 Signal Foundry 方向保留在 [docs/design/PROTO_SYNC_VISUAL_DIRECTION.md](docs/design/PROTO_SYNC_VISUAL_DIRECTION.md),仅作历史参考。
 
 ## License
 
