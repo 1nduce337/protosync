@@ -40,7 +40,7 @@ Design direction B was chosen (spec: `docs/design/MENUBAR_PANEL.md`).
 - ⚠️ **Still to do by hand:** check the settings window and the iOS screen (agent can't click or run the UI).
 - **Then:** Android migration to the same design.
 
-### Round 4 (cloud, not compiled yet): settings window in the panel style
+### Round 4 (compiled on the Mac; not checked by hand): settings window in the panel style
 
 The user found the native `Form` too bland, so `SettingsView.swift` was rewritten in the panel's language:
 - dark window (`darkAqua` in `main.swift`), fill groups and avatars, Lime only for switches, online dots and 配对;
@@ -49,9 +49,10 @@ The user found the native `Form` too bland, so `SettingsView.swift` was rewritte
 
 New small components (`SettingsSection`, `SettingsRow`, `SettingsDivider`, `PanelSmallAvatar`) live in the same file. See the spec for the full layout.
 
-**Next on the Mac:** run `swift build`, `swift run protosync-tests` and `./scripts/make-app.sh`, then open 设备与设置 and screenshot it.
+- ✅ **Verified on the Mac (no fixes needed):** `swift build`, `swift run protosync-tests` 45/45, `./scripts/make-app.sh`. iOS not rebuilt this round (no iOS files changed by the round).
+- ⚠️ **Still to do by hand:** open 设备与设置 and look at it.
 
- (compiled on the Mac; not checked by hand): settings window polish from the user's screenshots
+### Round 3 (compiled on the Mac; not checked by hand): settings window polish from the user's screenshots
 
 - **Paired-device rows:** the "自动接收" caption and switch now sit as one trailing column; removal moved into a "⋯" menu per row plus a right-click menu (still confirmed).
 - **Fingerprint:** shows the short 8-character form, with "复制完整指纹"; the full value is in the hover tooltip.
