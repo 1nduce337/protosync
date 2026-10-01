@@ -5,7 +5,7 @@ No private data here — see "Privacy" in `CLAUDE.md`.
 
 _Last updated: 2026-10-01 (local Mac session)_
 
-## Folder reorganisation (branch `chore/reorganize-folders`, branched from the branch below)
+## Folder reorganisation (merged into `main`)
 
 - Moved `ProtoSyncUIDemo/` and `android-compose-scaffold/` into `tools/`; moved `design/` into `docs/design/`.
 - Updated every reference: `Package.swift`, `.gitignore`, both icon/logo scripts, README, CLAUDE.md, design doc, scaffold README.
@@ -13,11 +13,11 @@ _Last updated: 2026-10-01 (local Mac session)_
 - ✅ Verified on the Mac: `swift build`, `swift run protosync-tests` (45/45), `swift build --target ProtoSyncUIDemo`, iOS simulator build (xcodegen + xcodebuild, unsigned).
 - ⚠️ Not run: `./scripts/make-app.sh`, `./scripts/make-demo-app.sh`, the icon/logo scripts after the path change, the Android build (Android sources were not touched).
 - Not done: deleting `android/legacy-backup/` and `DashboardView.swift`, cleaning untracked `.app` / `.bak` files.
-- This branch is based on the v2 hardening branch, so merge that one first (or merge them together).
+- Merged together with the v2 hardening work (fast-forward); `main` now contains both.
 
 ## Active branch
 
-`claude/affectionate-shannon-ry7gf9`, not merged into `main` yet.
+`main`. The v2 hardening branch (`claude/affectionate-shannon-ry7gf9`) and `chore/reorganize-folders` are both merged; start new work on a new branch.
 
 ## Done on this branch
 
@@ -49,7 +49,7 @@ _Last updated: 2026-10-01 (local Mac session)_
    - a file sent from a device with auto-receive off shows the prompt;
    - "always" turns auto-receive on for that device;
    - copying a password from a password manager on the Mac does not sync.
-5. If everything works, open a PR into `main`.
+5. Real-device checks from step 4 are still pending (merge happened after the Mac build and tests, not after device testing).
 
 ## Backlog (ideas, not started)
 
