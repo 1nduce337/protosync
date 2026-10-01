@@ -3,7 +3,17 @@
 Shared status between Claude Code sessions (local Mac and cloud). Update before ending a session.
 No private data here — see "Privacy" in `CLAUDE.md`.
 
-_Last updated: 2026-10-01 (cloud session, Round 11)_
+_Last updated: 2026-10-01 (cloud session: merged into `main` for the 0.0.1 release)_
+
+## Release 0.0.1 (now on `main`)
+
+- `feat/menubar-popover-ui` (Rounds 2–11) and `chore/cleanup` are merged into `main`. The user chose to skip most of the manual checks.
+- ⚠️ **Round 11 Swift changes (mutual unpair) have not been compiled yet.** `scripts/package-release.sh` runs `swift run protosync-tests`, so a compile error stops the release there. Fix it on `main` before going on.
+- **Release steps on the Mac:**
+  1. `git switch main && git pull`.
+  2. `scripts/package-release.sh 0.0.1` → `dist/ProtoSync-0.0.1-macOS.zip`, `-android.apk`, `-SHA256.txt`.
+  3. `git tag v0.0.1 && git push origin v0.0.1`.
+  4. Publish the GitHub pre-release "ProtoSync 0.0.1" from that tag, with `docs/releases/v0.0.1.md` as the body and the three `dist/` files attached: `gh release create v0.0.1 --prerelease --title "ProtoSync 0.0.1" --notes-file docs/releases/v0.0.1.md dist/ProtoSync-0.0.1-*`, or the web UI.
 
 ## In progress: menu-bar panel UI (branch `feat/menubar-popover-ui`)
 
@@ -225,6 +235,16 @@ The user reported: the "同步时发送通知" switch is on but nothing appears;
 - Note: the permission prompt is shown once by macOS. If the user dismissed it earlier, ProtoSync is listed in System Settings › Notifications and has to be enabled there (the new hint row links to it).
 - **Next on the Mac:** build and check the above, then do the release steps from Round 9 (run `scripts/package-release.sh 0.0.1` again so the zip includes this fix).
 
+## Cleanup (branch `chore/cleanup`, merged into `main`)
+
+Branched from `main`; `feat/menubar-popover-ui` was not touched. Three separate commits. After each step: `swift build`, `swift run protosync-tests` (45/45 on this branch) and `./android/build_apk.sh` all passed.
+- **Step 1:** the user backed up the Android debug keystore outside the repo before anything was deleted (it is gitignored and has no other copy).
+- **Step 2:** removed `android/legacy-backup/` (3 old Java files, unreferenced by code). Also deleted ignored leftovers: the legacy-UI backup `.app`, the demo `.app.bak`, and the `*.bak-*` files under `ios/`. Kept the current `ProtoSync.app` / `ProtoSyncUIDemo.app` builds and the scaffold's build directories.
+- **Step 2, skipped on purpose:** `DashboardView.swift` is still referenced on `main` (`main.swift` has the legacy-UI switch), so deleting it would change behaviour. The `feat/menubar-popover-ui` branch already removes it together with the switch; it goes away when that branch merges.
+- **Step 3:** a clean build had two warnings, both fixed with no behaviour change: an explicit `[self]` capture in `SyncEngine.requestOfferDecision`, and `else if url != nil` in `AppModel`. A clean build now prints none.
+- ⚠️ Not run: `./scripts/make-app.sh`, the iOS build (neither the iOS sources nor the app bundle script were changed).
+- Merge note: `feat/menubar-popover-ui` rewrites `AppModel.swift`, so the one-line `url != nil` change may conflict there; keep whichever side compiles.
+
 ## Folder reorganisation (merged into `main`)
 
 - Moved `ProtoSyncUIDemo/` and `android-compose-scaffold/` into `tools/`; moved `design/` into `docs/design/`.
@@ -237,7 +257,7 @@ The user reported: the "同步时发送通知" switch is on but nothing appears;
 
 ## Active branch
 
-`main`. The v2 hardening branch (`claude/affectionate-shannon-ry7gf9`) and `chore/reorganize-folders` are both merged; start new work on a new branch.
+`main`. Everything is merged: the v2 hardening branch, `chore/reorganize-folders`, `feat/menubar-popover-ui` and `chore/cleanup`. Start new work on a new branch.
 
 ## Done on this branch
 

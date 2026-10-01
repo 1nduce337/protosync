@@ -550,7 +550,7 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
         let request = FileOfferRequest(id: offer.id, name: offer.name, size: offer.size,
                                        from: connection.peerInfo ?? .init(fingerprint: offer.sourceFp, name: "未知设备"))
         let id = offer.id
-        notifyMain { delegate in
+        notifyMain { [self] delegate in
             delegate.engine(self, fileOfferRequested: request) { [weak self] accept in
                 self?.engineQueue.async { self?.resolveOffer(id: id, accept: accept) }
             }
