@@ -190,6 +190,7 @@ The user reported two bugs:
   - Java sends `unpair`, half-closes the socket (`shutdownOutput`), then closes 1.5 s later, so the frame isn't lost to an RST. Swift closes once `nw.send` has handed the frame off.
   - New delegate/listener callbacks: Swift `peerUnpaired` (macOS + iOS implement it), Java `onPeerUnpaired` (SyncService → MainActivity).
 - **Tests:** JVM harness +7 (paired flag over the wire, unpair after half-close, EOF closes the peer): 34/34. `protosync-tests` gained a "重连标记与 unpair" block (not run: cloud has no Swift).
+- ✅ The user's screenshot shows the Round 10 "收到「X」的剪贴板" banner appearing on the Mac, so receive notifications work. The app icon in the banner was blank.
 - **Notification icon was blank:** the iconset is fine. Notification Center caches the icon from when the app was first registered, which was before it had one. `make-app.sh` now runs `lsregister -f` on the built app. The Mac also needs a one-time cache reset (see the next steps).
 - **Next on the Mac:**
   1. `swift build && swift run protosync-tests`, `./scripts/make-app.sh`, `./android/build_apk.sh`, install on the phone.
@@ -197,7 +198,7 @@ The user reported two bugs:
   3. Device test: pair, then remove on Android → the Mac drops it within a second, with no new pairing request. Then the reverse. Then remove on one side while the other is offline/quit → when it comes back, it drops the pairing with no prompt.
   4. Then the Round 10 checks, then the release (Round 9 steps).
 
-### Round 10 (cloud; Swift unverified): macOS notifications fixed, "received" indicator in the menu bar
+### Round 10 (builds on the Mac; notifications and icon not checked by hand): macOS notifications fixed, "received" indicator in the menu bar
 
 The user reported: the "同步时发送通知" switch is on but nothing appears; and receiving a clipboard from another device shows nothing in the menu bar. **The release is on hold until this is checked.**
 - **Why notifications never showed:**
@@ -215,7 +216,8 @@ The user reported: the "同步时发送通知" switch is on but nothing appears;
   - *sent* (this Mac's copy synced): `arrow.up.circle.fill`, template (follows the menu-bar colour), 1.5 s. Replaces the old checkmark, which forced `darkAqua` and was white on a light menu bar;
   - *received* (clipboard or file from another device): `arrow.down.circle.fill` in palette colours, ink arrow on a Lime circle, visible on light and dark menu bars, 3 s; the tooltip names the sender (e.g. "已收到「X」的剪贴板").
   - `AppModel.onReceived` is the hook, called from the clipboard-received and file-saved callbacks.
-- ⚠️ **Unverified (cloud has no Swift):** `swift build`, then check by hand:
+- ✅ **Built on the Mac (no fixes needed):** `swift build`, `swift run protosync-tests` 48/48, `./scripts/make-app.sh`; the new ProtoSync.app was relaunched.
+- ⚠️ **Not checked by hand yet** (the agent can't see banners or the menu bar):
   1. with the switch on, copying on the Mac shows a banner even while the panel is open;
   2. receiving a clipboard from the phone shows a banner and the Lime ↓ icon for 3 s;
   3. if the palette colours come out reversed (Lime arrow on a dark circle), swap `[ink, lime]` in `receivedImage`;
