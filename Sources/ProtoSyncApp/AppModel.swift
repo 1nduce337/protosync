@@ -15,6 +15,10 @@ final class AppModel: ObservableObject, SyncEngine.Delegate {
     @Published var activities: [ActivityEntry] = []
     @Published var inboxFiles: [URL] = []
     @Published var pairingRequest: PairingRequest?
+    /// 本机主动发起、等对方确认的配对(展示同一配对码)
+    @Published var outgoingPairing: PeerConnection.PeerInfo?
+    /// 主动配对失败时的简短提示,几秒后自动消失
+    @Published var pairingNotice: String?
     /// 待确认的文件请求(来自未开启自动接收的设备),按到达顺序,界面展示第一个
     @Published var fileOffers: [FileOfferPrompt] = []
     @Published var deviceName: String = ""
@@ -203,6 +207,7 @@ final class AppModel: ObservableObject, SyncEngine.Delegate {
     // MARK: - SyncEngine.Delegate(主线程)
 
     func engine(_ engine: SyncEngine, peerConnected info: PeerConnection.PeerInfo) {
+        if outgoingPairing?.fingerprint == info.fingerprint { outgoingPairing = nil }
         refresh()
         appendActivity({ $0.detail = "已连接" }, base: ActivityEntry(
             id: UUID(), kind: .text, direction: .incoming,
@@ -226,6 +231,21 @@ final class AppModel: ObservableObject, SyncEngine.Delegate {
             let request = UNNotificationRequest(identifier: "pairing-request", content: content, trigger: nil)
             UNUserNotificationCenter.current().add(request)
         }
+    }
+
+    func engine(_ engine: SyncEngine, pairingAwaitingPeer info: PeerConnection.PeerInfo) {
+        outgoingPairing = info
+        pairingNotice = nil
+    }
+
+    func engine(_ engine: SyncEngine, pairingFailed info: PeerConnection.PeerInfo, error: String) {
+        if outgoingPairing?.fingerprint == info.fingerprint { outgoingPairing = nil }
+        let notice = "未能与「\(info.name)」配对：\(error)"
+        pairingNotice = notice
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+            if self?.pairingNotice == notice { self?.pairingNotice = nil }
+        }
+        refresh()
     }
 
     func engine(_ engine: SyncEngine, fileOfferRequested offer: SyncEngine.FileOfferRequest,

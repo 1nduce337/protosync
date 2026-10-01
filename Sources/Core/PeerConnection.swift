@@ -22,9 +22,12 @@ public final class PeerConnection {
     public struct PeerInfo {
         public var fingerprint: String
         public var name: String
-        public init(fingerprint: String, name: String) {
+        /// 本次握手的配对码(两端一致);非握手来源的 PeerInfo 为 nil
+        public var sas: String?
+        public init(fingerprint: String, name: String, sas: String? = nil) {
             self.fingerprint = fingerprint
             self.name = name
+            self.sas = sas
         }
     }
 
@@ -134,7 +137,8 @@ public final class PeerConnection {
                     throw ProtoSyncError.unexpectedMessage("重复 hello")
                 }
                 try channel.acceptPeerHello(message)
-                let info = PeerInfo(fingerprint: channel.peerFingerprint!, name: channel.peerName ?? "未知设备")
+                let info = PeerInfo(fingerprint: channel.peerFingerprint!, name: channel.peerName ?? "未知设备",
+                                    sas: channel.sasCode)
                 peerInfo = info
                 // responder 收到对方 hello 后,要先回自己的 hello 再进入 auth 阶段。
                 if role == .responder {

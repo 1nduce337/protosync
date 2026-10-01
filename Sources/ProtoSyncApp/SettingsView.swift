@@ -19,6 +19,10 @@ struct SettingsView: View {
             VStack(alignment: .leading, spacing: 24) {
                 header
                 if let request = model.pairingRequest { PanelPairingCard(model: model, request: request) }
+                if let outgoing = model.outgoingPairing { PanelOutgoingPairingCard(info: outgoing) }
+                if let notice = model.pairingNotice {
+                    Text(notice).font(.system(size: 12)).foregroundStyle(.secondary)
+                }
                 if let offer = model.fileOffers.first {
                     PanelOfferCard(model: model, prompt: offer, queued: model.fileOffers.count - 1)
                 }

@@ -17,6 +17,10 @@ struct MenuBarPanel: View {
             devices
             if showNearby { nearby }
             if let request = model.pairingRequest { PanelPairingCard(model: model, request: request) }
+            if let outgoing = model.outgoingPairing { PanelOutgoingPairingCard(info: outgoing) }
+            if let notice = model.pairingNotice {
+                Text(notice).font(.system(size: 11)).foregroundStyle(.secondary)
+            }
             if let offer = model.fileOffers.first {
                 PanelOfferCard(model: model, prompt: offer, queued: model.fileOffers.count - 1)
             }
@@ -28,6 +32,7 @@ struct MenuBarPanel: View {
         .frame(width: 360)
         .animation(.easeInOut(duration: 0.15), value: showNearby)
         .animation(.easeInOut(duration: 0.15), value: model.pairingRequest == nil)
+        .animation(.easeInOut(duration: 0.15), value: model.outgoingPairing?.fingerprint)
         .animation(.easeInOut(duration: 0.15), value: model.fileOffers.first?.id)
     }
 
@@ -278,12 +283,8 @@ struct PanelPairingCard: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("「\(request.info.name)」请求配对")
                 .font(.system(size: 12, weight: .semibold))
-            HStack(spacing: 6) {
-                Text("指纹").font(.system(size: 11)).foregroundStyle(.secondary)
-                Text(shortFPText(request.info.fingerprint))
-                    .font(.system(size: 13, weight: .medium).monospacedDigit())
-            }
-            Text("确认对方屏幕上显示同一指纹后再接受。")
+            PanelSASCode(code: request.info.sas ?? shortFPText(request.info.fingerprint))
+            Text("确认两台设备显示同一配对码后再接受。")
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
             HStack(spacing: 8) {
@@ -294,6 +295,43 @@ struct PanelPairingCard: View {
             }
         }
         .padding(12)
+        .background(Panel.fill, in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
+/// 配对码:两端相同的 6 位数字,大号等宽数字
+struct PanelSASCode: View {
+    let code: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("配对码").font(.system(size: 11)).foregroundStyle(.secondary)
+            Text(code)
+                .font(.system(size: 22, weight: .medium).monospacedDigit())
+                .textSelection(.enabled)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// 本机主动发起的配对:本机已同意,等对方核对同一配对码并接受
+struct PanelOutgoingPairingCard: View {
+    let info: PeerConnection.PeerInfo
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                ProgressView().controlSize(.small)
+                Text("正在与「\(info.name)」配对")
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            PanelSASCode(code: info.sas ?? shortFPText(info.fingerprint))
+            Text("请在对方设备上确认同一配对码并接受。")
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(Panel.fill, in: RoundedRectangle(cornerRadius: 10))
     }
 }

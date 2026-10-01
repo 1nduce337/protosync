@@ -80,6 +80,8 @@ public final class PeerLink {
     public boolean pairingDecided() { return pairingDecided; }
     public String peerFingerprint() { return peerFp; }
     public String peerName() { return peerName; }
+    /** 本次握手的配对码(两端一致);收到对端 hello 之前为 null */
+    public String sasCode() { return transcript64 == null ? null : Crypto.sas(transcript64); }
     public long lastInboundAt() { return lastInboundAt; }
     public long pairingDecidedAt() { return pairingDecidedAt; }
     public boolean awaitingDecision() { return peerFp != null && !pairingDecided; }

@@ -92,6 +92,33 @@ New small components (`SettingsSection`, `SettingsRow`, `SettingsDivider`, `Pane
   - how it looks and behaves on a device.
 - **Next:** plug in the phone (USB debugging on), run `adb install -r android/build/ProtoSync-android.apk`, and check the main screen and settings sheet.
 
+### Round 6 (cloud): pairing fixes from device testing
+
+The user reported two bugs:
+- each side showed the *other* device's fingerprint as the "code", so the two screens never matched;
+- both sides asked for approval, so accepting on one side left a one-sided pairing.
+
+**Fixes (Swift and Java):**
+- **6-digit pairing code (SAS)** shown on both screens, derived from the shared transcript (`SecureChannel.sas` / `Crypto.sas`). It is local only, with no wire change. `PeerInfo.sas` carries it to the UI; on Android it travels through `SyncCore.Listener` and `SyncService.Ui` (`onPairingRequested(name, fp, sas)`).
+- **The initiator auto-accepts:** tapping 配对 records an intent (2 min). That one handshake is granted without asking, and the UI shows "正在与「X」配对" with the code. Only the other side gets a request card.
+- **Persistence:** the initiator saves the pairing **only when the connection is established**. If the handshake fails or is rejected, both sides are told (`pairingFailed` / `onPairingFailed`) and no one-sided entry is left.
+- The receiving side is unchanged: accepting saves the pairing immediately.
+
+**Verified in the cloud:**
+- Android compiles;
+- the harness passes 27/27, including both ends of a real handshake computing the same code;
+- the Java code matches an independent Python version of the Swift formula on 3 random handshakes.
+
+**Not verified:** Swift compile, and pairing on real devices.
+
+**Next on the Mac:**
+1. Run `swift build` and `swift run protosync-tests` (3 new code tests), `./scripts/make-app.sh`, and `./android/build_apk.sh`.
+2. On the devices, remove the existing pairing on **both** sides, then pair from one side. Check that:
+   - both screens show the same code;
+   - only the other side asks;
+   - accepting makes both sides list each other;
+   - rejecting leaves neither side paired.
+
 ## Folder reorganisation (merged into `main`)
 
 - Moved `ProtoSyncUIDemo/` and `android-compose-scaffold/` into `tools/`; moved `design/` into `docs/design/`.

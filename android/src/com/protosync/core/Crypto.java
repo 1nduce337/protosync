@@ -107,6 +107,20 @@ public final class Crypto {
         md.update(nameBytes);
     }
 
+    /**
+     * 配对码 = SHA256("ProtoSync-SAS" ‖ transcript) 前 4 字节(大端)对 1,000,000 取模,补齐 6 位,
+     * 格式“123 456”。与 Swift SecureChannel.sas 逐字节对齐;只在本地计算展示,不上线。
+     */
+    public static String sas(byte[] transcriptHash) {
+        MessageDigest md = sha256();
+        md.update("ProtoSync-SAS".getBytes(StandardCharsets.UTF_8));
+        md.update(transcriptHash);
+        byte[] d = md.digest();
+        long v = ((d[0] & 0xffL) << 24) | ((d[1] & 0xffL) << 16) | ((d[2] & 0xffL) << 8) | (d[3] & 0xffL);
+        String digits = String.format(java.util.Locale.US, "%06d", v % 1_000_000L);
+        return digits.substring(0, 3) + " " + digits.substring(3);
+    }
+
     /** 签名载荷 = 角色标签 ‖ transcript。角色标签防止一端的 auth 被反射回它自己。 */
     public static byte[] authPayload(Role signer, byte[] transcriptHash) {
         String label = signer == Role.INITIATOR ? "protosync-auth-initiator" : "protosync-auth-responder";

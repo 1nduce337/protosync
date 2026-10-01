@@ -27,6 +27,9 @@ public final class SecureChannel {
     public private(set) var peerName: String?
     public private(set) var peerSignPub: P256.Signing.PublicKey?
     public private(set) var peerDhPub: P256.KeyAgreement.PublicKey?
+    /// 6 位配对码(“123 456”):两端由同一 transcript 推导,配对时让用户核对两块屏幕上的码是否一致。
+    /// 中间人会与两端各自形成不同的 transcript,码对不上。
+    public private(set) var sasCode: String?
 
     private var myEph: P256.KeyAgreement.PrivateKey?
     private var transcriptHash: Data?
@@ -92,6 +95,7 @@ public final class SecureChannel {
         transcriptHash = role == .initiator
             ? Self.transcript(initiator: me, responder: peer)
             : Self.transcript(initiator: peer, responder: me)
+        sasCode = Self.sas(transcriptHash!)
 
         let ss1 = try myEph.sharedSecretFromKeyAgreement(with: peerEph)
         let ss2: SharedSecret
@@ -158,6 +162,19 @@ public final class SecureChannel {
             hasher.update(data: nameBytes)
         }
         return Data(hasher.finalize())
+    }
+
+    /// 配对码 = SHA256("ProtoSync-SAS" || transcriptHash) 前 4 字节(大端)对 1,000,000 取模,补齐 6 位。
+    /// 与 Android Crypto.sas 逐字节对齐;只在本地计算展示,不上线。
+    static func sas(_ transcriptHash: Data) -> String {
+        var hasher = SHA256()
+        hasher.update(data: Data("ProtoSync-SAS".utf8))
+        hasher.update(data: transcriptHash)
+        let d = Array(hasher.finalize())
+        let value = (UInt32(d[0]) << 24 | UInt32(d[1]) << 16 | UInt32(d[2]) << 8 | UInt32(d[3])) % 1_000_000
+        let digits = String(value)
+        let padded = String(repeating: "0", count: 6 - digits.count) + digits
+        return "\(padded.prefix(3)) \(padded.suffix(3))"
     }
 
     /// 签名载荷 = 角色标签 || transcriptHash。角色标签防止把一端的 auth 反射给它自己。

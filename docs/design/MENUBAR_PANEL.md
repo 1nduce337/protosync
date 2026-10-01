@@ -19,7 +19,10 @@ Anything that needs a decision appears in the panel, and nothing else asks for a
    - **Drag a file onto an avatar:** sends it to that device (a lime ring shows the drop target).
    - **Right-click:** send file, the 自动接收文件 toggle, remove device.
    - **Dashed "+" circle:** toggles the nearby-devices list for pairing.
-3. **Decision cards**, only when needed: a pairing request (fingerprint shown in monospace digits) and a file request (接收 / 拒绝 / 总是).
+3. **Decision cards**, only when needed:
+   - **Pairing request** (on the device being asked): the 6-digit 配对码 in large monospaced digits, which both screens show identically, plus 接受 / 拒绝.
+   - **"正在与「X」配对"** (on the device where you tapped 配对): the same 配对码 and "请在对方设备上确认", with no buttons.
+   - **File request:** 接收 / 拒绝 / 总是.
 4. **Transfers**: one line each with a 3 pt progress bar, or "等待对方确认" while the receiver decides.
 5. **Clipboard history**: the last 6 items, in memory only and never written to disk.
    - Click an item to copy it again.

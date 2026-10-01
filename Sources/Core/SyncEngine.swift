@@ -21,6 +21,10 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
         func engine(_ engine: SyncEngine, fileOfferExpired id: String)
         /// 本端发出的文件正在等待对方确认。
         func engine(_ engine: SyncEngine, fileAwaitingApproval id: String, name: String)
+        /// 本端主动发起的配对:本端已同意,等对方核对配对码并接受。
+        func engine(_ engine: SyncEngine, pairingAwaitingPeer info: PeerConnection.PeerInfo)
+        /// 本端主动发起的配对没有完成(对方拒绝 / 超时 / 断开)。
+        func engine(_ engine: SyncEngine, pairingFailed info: PeerConnection.PeerInfo, error: String)
     }
 
     public struct FileOfferRequest: Identifiable {
@@ -58,6 +62,12 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
     private var outgoing: [String: OutgoingTransfer] = [:]
     private var incoming: [String: IncomingTransfer] = [:]
     private var pendingOffers: [String: PendingOffer] = [:]   // 等待用户确认的文件请求
+    /// 用户点了“配对”的设备:shortFp → 时间。对应的握手由本端自动同意(点按本身就是同意),
+    /// 只需对方确认;2 分钟内有效。
+    private var pairingIntents: [String: Date] = [:]
+    /// 因配对意图自动同意、尚未建立连接的对端指纹:连接建立后才写入配对列表,
+    /// 对方拒绝就不留下“单方面已配对”的记录。
+    private var autoGrantedPairings: Set<String> = []
     public let inboxDirectory: URL
 
     /// 每个传输会话的在途分块上限,防止大文件撑爆发送缓冲。
@@ -223,6 +233,8 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
     public func pairWith(shortFp: String) {
         engineQueue.async { [weak self] in
             guard let self, let service = self.discovered[shortFp] else { return }
+            // 服务名可能带 mDNS 改名后缀(“xxxx (2)”):意图只记指纹前 8 位
+            self.pairingIntents[String(shortFp.prefix(8))] = Date()
             self.openConnection(to: service.endpoint, role: .initiator)
         }
     }
@@ -345,6 +357,10 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
                 return
             }
             self.pending.removeAll { $0 === connection }
+            // 本端主动发起、对方已接受:双方都确认了,此时才持久化配对
+            if self.autoGrantedPairings.remove(peer.fingerprint) != nil {
+                self.store.addPaired(fingerprint: peer.fingerprint, name: peer.name)
+            }
             if let existing = self.connections[peer.fingerprint], existing !== connection {
                 // 双方同时发起导致的重复连接:双方按同一规则收敛——
                 // fp 较小一方发起的连接获胜。
@@ -368,6 +384,8 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
     public func connection(_ connection: PeerConnection, didAcceptPairing peer: PeerConnection.PeerInfo) {
         // Runs on engineQueue. Persist trust only after PeerConnection confirms
         // the request is still live, so accepting a stale UI banner cannot pair.
+        // 本端主动发起的配对例外:等连接建立(对方也接受)后再持久化。
+        guard !autoGrantedPairings.contains(peer.fingerprint) else { return }
         store.addPaired(fingerprint: peer.fingerprint, name: peer.name)
     }
 
@@ -403,6 +421,14 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
         engineQueue.async { [weak self] in
             guard let self else { return }
             self.pending.removeAll { $0 === connection }
+            // 本端主动发起的配对没走到建立:告诉 UI,不留配对记录
+            if let info = connection.peerInfo, self.autoGrantedPairings.contains(info.fingerprint),
+               self.connections[info.fingerprint] == nil,
+               !self.pending.contains(where: { $0.peerInfo?.fingerprint == info.fingerprint }) {
+                self.autoGrantedPairings.remove(info.fingerprint)
+                let reason = error ?? "连接已断开"
+                self.notifyMain { $0.engine(self, pairingFailed: info, error: reason) }
+            }
             if let info = connection.peerInfo, self.connections[info.fingerprint] === connection {
                 self.connections.removeValue(forKey: info.fingerprint)
                 self.cancelTransfers(for: info.fingerprint, reason: error ?? "连接已关闭")
@@ -755,10 +781,23 @@ public final class SyncEngine: NSObject, PeerConnection.Delegate {
             guard let self else { reply(false); return }
             if self.store.isPaired(info.fingerprint) {
                 reply(true)
+            } else if self.consumePairingIntent(for: info.fingerprint) {
+                // 用户刚在本机点了“配对”:本端直接同意,只等对方核对配对码
+                self.autoGrantedPairings.insert(info.fingerprint)
+                reply(true)
+                self.notifyMain { $0.engine(self, pairingAwaitingPeer: info) }
             } else {
                 self.notifyMain { $0.engine(self, pairingRequested: info, reply: reply) }
             }
         }
+    }
+
+    /// 在 engineQueue 上调用:命中且未过期的配对意图只用一次
+    private func consumePairingIntent(for fingerprint: String) -> Bool {
+        pairingIntents = pairingIntents.filter { $0.value.timeIntervalSinceNow > -120 }
+        guard let key = pairingIntents.keys.first(where: { fingerprint.hasPrefix($0) }) else { return false }
+        pairingIntents.removeValue(forKey: key)
+        return true
     }
 
     // MARK: - 工具
@@ -842,6 +881,8 @@ public extension SyncEngine.Delegate {
                 reply: @escaping (Bool) -> Void) { reply(false) }
     func engine(_ engine: SyncEngine, fileOfferExpired id: String) {}
     func engine(_ engine: SyncEngine, fileAwaitingApproval id: String, name: String) {}
+    func engine(_ engine: SyncEngine, pairingAwaitingPeer info: PeerConnection.PeerInfo) {}
+    func engine(_ engine: SyncEngine, pairingFailed info: PeerConnection.PeerInfo, error: String) {}
 }
 
 /// 剪贴板去重缓存:哈希 → 时间戳,过期清理,容量上限。

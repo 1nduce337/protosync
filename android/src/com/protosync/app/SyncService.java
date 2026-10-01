@@ -56,8 +56,8 @@ public class SyncService extends Service {
     private byte[] pendingClipboardImage;
 
     private static class PendingPair {
-        final String name, fp;
-        PendingPair(String n, String f) { name = n; fp = f; }
+        final String name, fp, sas;
+        PendingPair(String n, String f, String s) { name = n; fp = f; sas = s; }
     }
 
     /** 待确认的文件请求:与配对一样逐个派发给 UI,UI 不在时排队并发通知。 */
@@ -134,7 +134,9 @@ public class SyncService extends Service {
         void onLog(String line);
         void onPeerConnected(String name, String fp);
         void onPeerDisconnected(String fp, String reason);
-        void onPairingRequested(String name, String fp);
+        void onPairingRequested(String name, String fp, String sas);
+        void onPairingAwaitingPeer(String name, String fp, String sas);
+        void onPairingFailed(String name, String fp, String reason);
         void onClipboardText(String text);
         void onClipboardImage(byte[] png);
         void onClipboardResult(boolean ok, String detail);
@@ -262,7 +264,7 @@ public class SyncService extends Service {
             pairGeneration++;
         }
         nm.cancel(2);
-        d.onPairingRequested(p.name, p.fp);
+        d.onPairingRequested(p.name, p.fp, p.sas);
     }
 
     /** UI 对当前配对弹窗作出决定(主线程)。陈旧决定被代际号拦下。 */
@@ -291,13 +293,19 @@ public class SyncService extends Service {
             updateNotification();
             Ui d = currentUi(); if (d != null) d.onPeerDisconnected(fp, reason);
         }
-        @Override public void onPairingRequested(String name, String fp) {
+        @Override public void onPairingRequested(String name, String fp, String sas) {
             synchronized (clientLock) {
                 for (PendingPair pp : pendingPairs) if (pp.fp.equals(fp)) return; // 去重
-                pendingPairs.addLast(new PendingPair(name, fp));
+                pendingPairs.addLast(new PendingPair(name, fp, sas));
             }
             dispatchNextPair();
-            if (currentUi() == null) notifyPairing(name, fp);
+            if (currentUi() == null) notifyPairing(name, sas);
+        }
+        @Override public void onPairingAwaitingPeer(String name, String fp, String sas) {
+            Ui d = currentUi(); if (d != null) d.onPairingAwaitingPeer(name, fp, sas);
+        }
+        @Override public void onPairingFailed(String name, String fp, String reason) {
+            Ui d = currentUi(); if (d != null) d.onPairingFailed(name, fp, reason);
         }
         @Override public void onClipboardText(String text) {
             if (uiPresent()) {
@@ -485,11 +493,11 @@ public class SyncService extends Service {
         nm.notify(NOTIF_FILE_OFFER, n);
     }
 
-    private void notifyPairing(String name, String fp) {
+    private void notifyPairing(String name, String sas) {
         Notification n = new Notification.Builder(this, CHANNEL_PAIR)
                 .setSmallIcon(android.R.drawable.ic_dialog_info)
                 .setContentTitle("配对请求")
-                .setContentText(name + " (" + fp.substring(0, Math.min(8, fp.length())) + ") 请求配对,点击处理")
+                .setContentText(name + " 请求配对" + (sas != null ? "，配对码 " + sas : "") + "，点击处理")
                 .setAutoCancel(true)
                 .setContentIntent(openActivity())
                 .build();

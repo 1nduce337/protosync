@@ -47,7 +47,11 @@ public final class SyncCore {
         void onLog(String line);
         void onPeerConnected(String name, String fp);
         void onPeerDisconnected(String fp, String reason);
-        void onPairingRequested(String name, String fp);
+        void onPairingRequested(String name, String fp, String sas);
+        /** 本机主动发起的配对:本机已同意,等对方核对同一配对码并接受 */
+        void onPairingAwaitingPeer(String name, String fp, String sas);
+        /** 本机主动发起的配对没有完成(对方拒绝 / 超时 / 断开) */
+        void onPairingFailed(String name, String fp, String reason);
         void onClipboardText(String text);
         void onClipboardImage(byte[] png);
         void onClipboardResult(boolean ok, String detail);
@@ -138,6 +142,10 @@ public final class SyncCore {
     private final Map<String, Long> connectAttempts = new HashMap<>();
     private final Map<String, Long> dialBlockedUntil = new HashMap<>();      // fp → 拉黑截止时间
     private final Map<String, String> pairingNames = new HashMap<>();        // 配对请求队列中的 fp → 设备名
+    /** 用户点了“配对”的设备:服务名前 8 位(指纹前缀)→ 时间;对应握手由本机自动同意,2 分钟有效 */
+    private final Map<String, Long> pairingIntents = new HashMap<>();
+    /** 因配对意图自动同意、尚未建立的对端:建立后才持久化,对方拒绝不留单方面配对记录 */
+    private final Set<String> autoGrantedPairings = new HashSet<>();
     private final ArrayDeque<ActivityItem> activityLog = new ArrayDeque<>();
     private final ArrayDeque<ClipItem> clipHistory = new ArrayDeque<>();
     private final ArrayDeque<ReceivedFile> recentFiles = new ArrayDeque<>();
@@ -317,6 +325,8 @@ public final class SyncCore {
             }
             String host = info.getHost().getHostAddress();
             int port = info.getPort();
+            pairingIntents.put(serviceName.substring(0, Math.min(8, serviceName.length())),
+                    System.currentTimeMillis());
             connectors.execute(() -> {
                 try {
                     Socket s = new Socket();
@@ -532,17 +542,26 @@ public final class SyncCore {
     private class PairingPolicyImpl implements PeerLink.PairingPolicy {
         @Override public void decide(PeerLink link, String name, String fp) {
             boolean paired = identity.isPaired(fp);
+            boolean intended = !paired && consumePairingIntent(fp);
             postLog("配对裁决 [" + link.role + "] " + fp.substring(0, Math.min(8, fp.length()))
-                    + " → " + (paired ? "已配对,自动放行" : "未配对,请求用户确认"));
+                    + " → " + (paired ? "已配对,自动放行" : intended ? "本机发起,自动同意,等对方确认" : "未配对,请求用户确认"));
+            String sas = link.sasCode();
             if (paired) {
                 runOnEngine(() -> link.decidePairing(true));
+                return;
+            }
+            if (intended) {
+                // 用户刚在本机点了“配对”:点按本身就是同意,只等对方核对配对码
+                autoGrantedPairings.add(fp);
+                runOnEngine(() -> link.decidePairing(true));
+                postEvent(() -> listener.onPairingAwaitingPeer(name, fp, sas));
                 return;
             }
             runOnEngine(() -> {
                 if (link.isClosed() || link.pairingDecided()) return;
                 pairingNames.put(fp, name);
                 awaitingPairing.addLast(link);
-                postEvent(() -> listener.onPairingRequested(name, fp));
+                postEvent(() -> listener.onPairingRequested(name, fp, sas));
             });
         }
     }
@@ -552,10 +571,25 @@ public final class SyncCore {
         @Override public void closed(PeerLink link, String reason) { onLinkClosed(link, reason); }
     }
 
+    /** 引擎线程:命中且未过期的配对意图只用一次 */
+    private boolean consumePairingIntent(String fp) {
+        long now = System.currentTimeMillis();
+        pairingIntents.values().removeIf(t -> now - t > 120_000);
+        for (Iterator<String> it = pairingIntents.keySet().iterator(); it.hasNext(); ) {
+            if (fp.startsWith(it.next())) { it.remove(); return true; }
+        }
+        return false;
+    }
+
     private void onLinkEstablished(PeerLink link) {
         String fp = link.peerFingerprint();
         pending.remove(link);
         removeFromAwaiting(link);
+        // 本机主动发起、对方已接受:双方都确认了,此时才持久化配对
+        if (autoGrantedPairings.remove(fp)) {
+            identity.addPaired(fp, link.peerName());
+            postLog("🔐 已配对并持久化 " + fp.substring(0, Math.min(8, fp.length())) + " (" + link.peerName() + ")");
+        }
         PeerLink existing = connections.get(fp);
         if (existing != null && existing != link) {
             // 双向同时各建一条:双方按同一规则收敛——fp 较小一方发起的连接获胜。
@@ -590,6 +624,16 @@ public final class SyncCore {
         }
         postLog("🔌 断开 " + fp.substring(0, Math.min(8, fp.length())) + " [" + link.role + "]"
                 + (reason != null ? " (" + reason + ")" : ""));
+        if (autoGrantedPairings.contains(fp) && !connections.containsKey(fp)) {
+            boolean stillTrying = false;
+            for (PeerLink p : pending) if (fp.equals(p.peerFingerprint())) stillTrying = true;
+            if (!stillTrying) {
+                autoGrantedPairings.remove(fp);
+                String name = link.peerName();
+                String why = reason == null ? "连接已断开" : reason;
+                postEvent(() -> listener.onPairingFailed(name, fp, why));
+            }
+        }
         if (connections.get(fp) == link) {
             connections.remove(fp);
             transfers.cancelForPeer(fp, reason == null ? "连接已关闭" : reason);

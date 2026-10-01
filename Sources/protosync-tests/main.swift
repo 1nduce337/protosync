@@ -158,6 +158,19 @@ do {
         try server.verifyAuth(try client.makeAuth())
         try client.verifyAuth(try server.makeAuth())
         check(true, "握手:v2 正常双向认证")
+        check(client.sasCode != nil && client.sasCode == server.sasCode, "配对码:两端一致")
+        check(client.sasCode?.count == 7 && client.sasCode?.dropFirst(3).first == " ", "配对码:格式为“123 456”")
+    }
+
+    // 篡改握手(中间人改名)→ 两端配对码不同,用户核对时能发现
+    do {
+        let client = SecureChannel(identity: alice.identity, role: .initiator)
+        let server = SecureChannel(identity: bob.identity, role: .responder)
+        var tampered = client.makeHello()
+        tampered.name = "Mallory"
+        try server.acceptPeerHello(tampered)
+        try client.acceptPeerHello(server.makeHello())
+        check(client.sasCode != server.sasCode, "配对码:握手被篡改时两端不同")
     }
 } catch {
     failures += 1

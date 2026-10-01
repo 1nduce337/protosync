@@ -74,8 +74,10 @@ public class MainActivity extends Activity implements SyncService.Ui {
     private final WeakHashMap<SyncCore.ClipItem, int[]> originalSizes = new WeakHashMap<>();
     private boolean showNearby = false;
 
-    /** 当前展示的配对请求 {name, fp};由服务逐个派发,决定后服务派发下一个 */
+    /** 当前展示的配对请求 {name, fp, sas};由服务逐个派发,决定后服务派发下一个 */
     private String[] activePair;
+    /** 本机主动发起、等对方确认的配对 {name, fp, sas} */
+    private String[] outgoingPair;
 
     /** 当前展示的文件请求 */
     private static class OfferUi {
@@ -474,14 +476,18 @@ public class MainActivity extends Activity implements SyncService.Ui {
 
     private void renderRequests() {
         requestsBox.removeAllViews();
-        if (activePair == null && activeOffer == null) {
+        if (activePair == null && outgoingPair == null && activeOffer == null) {
             requestsBox.setVisibility(View.GONE);
             return;
         }
         requestsBox.setVisibility(View.VISIBLE);
-        if (activePair != null) requestsBox.addView(pairingCard(activePair[0], activePair[1]));
+        if (activePair != null) requestsBox.addView(pairingCard(activePair[0], activePair[1], activePair[2]));
+        if (outgoingPair != null) {
+            requestsBox.addView(outgoingPairingCard(outgoingPair[0], outgoingPair[1], outgoingPair[2]),
+                    PanelUi.matchWrap(this, requestsBox.getChildCount() > 0 ? 12 : 0));
+        }
         if (activeOffer != null) {
-            requestsBox.addView(offerCard(activeOffer), PanelUi.matchWrap(this, activePair != null ? 12 : 0));
+            requestsBox.addView(offerCard(activeOffer), PanelUi.matchWrap(this, requestsBox.getChildCount() > 0 ? 12 : 0));
         }
     }
 
@@ -494,16 +500,42 @@ public class MainActivity extends Activity implements SyncService.Ui {
         return card;
     }
 
-    private View pairingCard(String name, String fp) {
+    /** 配对码:两端相同的 6 位数字 */
+    private void addSasCode(LinearLayout card, String sas, String fp) {
+        card.addView(PanelUi.text(this, "配对码", 12, TEXT_SECONDARY), PanelUi.matchWrap(this, 10));
+        TextView code = PanelUi.text(this, sas != null ? sas : PanelUi.shortFp(fp), 28, TEXT);
+        code.setFontFeatureSettings("tnum");
+        card.addView(code, PanelUi.matchWrap(this, 2));
+    }
+
+    private View pairingCard(String name, String fp, String sas) {
         LinearLayout card = card();
         card.addView(PanelUi.bold(this, "「" + name + "」请求配对", 15, TEXT));
-        TextView code = PanelUi.text(this, PanelUi.shortFp(fp), 28, TEXT);
-        code.setFontFeatureSettings("tnum");
-        card.addView(code, PanelUi.matchWrap(this, 10));
-        card.addView(PanelUi.text(this, "确认对方屏幕上显示同一指纹后再接受。", 13, TEXT_SECONDARY),
+        addSasCode(card, sas, fp);
+        card.addView(PanelUi.text(this, "确认两台设备显示同一配对码后再接受。", 13, TEXT_SECONDARY),
                 PanelUi.matchWrap(this, 6));
         card.addView(buttonPair("接受", v -> decidePair(fp, true), "拒绝", v -> decidePair(fp, false)),
                 PanelUi.matchWrap(this, 14));
+        return card;
+    }
+
+    /** 本机主动发起的配对:本机已同意,等对方核对同一配对码并接受 */
+    private View outgoingPairingCard(String name, String fp, String sas) {
+        LinearLayout card = card();
+        LinearLayout title = new LinearLayout(this);
+        title.setOrientation(LinearLayout.HORIZONTAL);
+        title.setGravity(Gravity.CENTER_VERTICAL);
+        android.widget.ProgressBar spinner = new android.widget.ProgressBar(this);
+        spinner.setIndeterminateTintList(ColorStateList.valueOf(TEXT_SECONDARY));
+        title.addView(spinner, new LinearLayout.LayoutParams(PanelUi.dp(this, 18), PanelUi.dp(this, 18)));
+        TextView text = PanelUi.bold(this, "正在与「" + name + "」配对", 15, TEXT);
+        LinearLayout.LayoutParams textLp = PanelUi.weight1();
+        textLp.leftMargin = PanelUi.dp(this, 8);
+        title.addView(text, textLp);
+        card.addView(title);
+        addSasCode(card, sas, fp);
+        card.addView(PanelUi.text(this, "请在对方设备上确认同一配对码并接受。", 13, TEXT_SECONDARY),
+                PanelUi.matchWrap(this, 6));
         return card;
     }
 
@@ -760,6 +792,7 @@ public class MainActivity extends Activity implements SyncService.Ui {
     @Override public void onPeerConnected(String name, String fp) {
         // 配对可能由对端接受驱动完成:卡片随之收起
         if (activePair != null && activePair[1].equals(fp)) activePair = null;
+        if (outgoingPair != null && outgoingPair[1].equals(fp)) outgoingPair = null;
         toast("已连接 " + name);
         renderAll();
     }
@@ -768,9 +801,21 @@ public class MainActivity extends Activity implements SyncService.Ui {
         renderAll();
     }
 
-    @Override public void onPairingRequested(String name, String fp) {
-        activePair = new String[]{name, fp};
+    @Override public void onPairingRequested(String name, String fp, String sas) {
+        activePair = new String[]{name, fp, sas};
         renderRequests();
+    }
+
+    @Override public void onPairingAwaitingPeer(String name, String fp, String sas) {
+        outgoingPair = new String[]{name, fp, sas};
+        showNearby = false;
+        renderAll();
+    }
+
+    @Override public void onPairingFailed(String name, String fp, String reason) {
+        if (outgoingPair != null && outgoingPair[1].equals(fp)) outgoingPair = null;
+        renderRequests();
+        toast("未能与「" + name + "」配对：" + reason);
     }
 
     @Override public void onFileOfferRequested(String id, String name, long size, String fromName, String fromFp) {

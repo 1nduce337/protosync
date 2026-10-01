@@ -76,6 +76,10 @@ final class IOSAppModel: ObservableObject, @preconcurrency SyncEngine.Delegate {
     @Published var nearby: [String] = []       // 未配对已发现设备的短指纹
     @Published var isScanning = false
     @Published var pairing: PairingRequest?
+    /// 本机主动发起、等对方确认的配对(展示同一配对码)
+    @Published var outgoingPairing: PeerConnection.PeerInfo?
+    /// 主动配对失败时的简短提示,几秒后自动消失
+    @Published var pairingNotice: String?
     /// 待确认的文件请求(来自未开启自动接收的设备),界面展示第一个
     @Published var fileOffers: [FileOfferPrompt] = []
     /// 已关闭“自动接收文件”的已配对设备指纹
@@ -312,6 +316,7 @@ final class IOSAppModel: ObservableObject, @preconcurrency SyncEngine.Delegate {
     // MARK: - SyncEngine.Delegate(主线程回调)
 
     func engine(_ engine: SyncEngine, peerConnected info: PeerConnection.PeerInfo) {
+        if outgoingPairing?.fingerprint == info.fingerprint { outgoingPairing = nil }
         refresh()
         refreshNearby()
         log("↓ 已连接 \(info.name)(\(info.fingerprint.prefix(8)))")
@@ -346,6 +351,23 @@ final class IOSAppModel: ObservableObject, @preconcurrency SyncEngine.Delegate {
 
     func engine(_ engine: SyncEngine, fileAwaitingApproval id: String, name: String) {
         log("↑ 等待对方确认:\(name)")
+    }
+
+    func engine(_ engine: SyncEngine, pairingAwaitingPeer info: PeerConnection.PeerInfo) {
+        outgoingPairing = info
+        pairingNotice = nil
+        log("等待 \(info.name) 确认配对(配对码 \(info.sas ?? "—"))")
+    }
+
+    func engine(_ engine: SyncEngine, pairingFailed info: PeerConnection.PeerInfo, error: String) {
+        if outgoingPairing?.fingerprint == info.fingerprint { outgoingPairing = nil }
+        let notice = "未能与「\(info.name)」配对：\(error)"
+        pairingNotice = notice
+        log(notice)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+            if self?.pairingNotice == notice { self?.pairingNotice = nil }
+        }
+        refresh()
     }
 
     func engine(_ engine: SyncEngine, didReceiveClipboardText text: String, from peer: PeerConnection.PeerInfo) {
