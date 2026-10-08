@@ -31,6 +31,18 @@ Anything that needs a decision appears in the panel, and nothing else asks for a
 
 Right-clicking the menu-bar icon keeps the classic menu.
 
+**Keeping the panel open while picking files:**
+- **Pin button** in the header (`pin` / `pin.fill`, Lime when on): the popover switches from `.transient` to `.applicationDefined`, so clicking in Finder no longer closes it. Closing the panel unpins it.
+- **Dragging a file onto the menu-bar icon** opens the panel, so the drag can continue onto a device avatar.
+
+## 发送文件 window (macOS)
+
+A regular window (gear menu / footer "发送窗口" / right-click menu) for sending several files at once. It doesn't close when you switch apps.
+- Each paired device is a large tile (adaptive grid, 150 pt min): it is a drop target for many files at once, and clicking it opens a multi-select file picker. A Lime ring and "松开即发送" show the drop target; offline tiles are dimmed and disabled.
+- Pending pairing / file requests use the same cards as the panel.
+- "传输" lists the last 30 file transfers, with progress bars, "等待对方确认" or the final status.
+- Footer: "文件夹暂不支持，请先压缩。" and the inbox link.
+
 **Menu-bar icon feedback:** the logo template icon briefly changes, and the tooltip says what happened.
 - **Sent** (this Mac's copy synced): `arrow.up.circle.fill`, template, 1.5 s.
 - **Received** (clipboard or file from another device): `arrow.down.circle.fill`, ink arrow on a Lime circle, 3 s. This is the one place Lime appears in the menu bar: receiving changes your clipboard, so it should be noticed.

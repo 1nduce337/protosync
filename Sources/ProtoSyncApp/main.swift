@@ -1,15 +1,19 @@
 import AppKit
 import SwiftUI
 import Darwin
+import Combine
 import Core
 
 // ProtoSync 菜单栏应用(LSUIElement,无 Dock 图标)。
 // 左键菜单栏图标:弹出面板(日常操作,MenuBarPanel);右键:传统菜单;
 // 主窗口降级为“设备与设置”,不再随启动弹出。
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate, NSPopoverDelegate, NSWindowDelegate,
+                         NSDraggingDestination {
     var model: AppModel!
     var window: NSWindow!
+    private var sendWindow: NSWindow?
+    private var pinObserver: AnyCancellable?
     private let monitor = ClipboardMonitor()
     private var statusItem: NSStatusItem!
     private var popover: NSPopover!
@@ -42,7 +46,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// 主窗口或弹出面板可见才允许读取(仅当全局读取关闭时参与判断)。
-    private var windowVisible: Bool { window?.isVisible == true || popover?.isShown == true }
+    private var windowVisible: Bool {
+        window?.isVisible == true || sendWindow?.isVisible == true || popover?.isShown == true
+    }
 
     // MARK: - 同步反馈
 
@@ -188,6 +194,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self?.popover.performClose(nil)
                 self?.showMainWindow()
             },
+            openSendWindow: { [weak self] in
+                self?.popover.performClose(nil)
+                self?.showSendWindow()
+            },
             quit: { NSApp.terminate(nil) })
         let hosting = NSHostingController(rootView: panel)
         hosting.sizingOptions = .preferredContentSize   // 面板高度随内容(请求卡片、传输)变化
@@ -196,7 +206,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         popover.animates = true
         popover.appearance = NSAppearance(named: .darkAqua)
         popover.contentViewController = hosting
+        popover.delegate = self
+        // 固定后点面板外(例如去访达里选文件)不收起;只有再点菜单栏图标或取消固定才收起
+        pinObserver = model.$panelPinned.sink { [weak self] pinned in
+            self?.popover.behavior = pinned ? .applicationDefined : .transient
+        }
+
+        // 把文件拖到菜单栏图标上:自动弹出面板,接着拖到设备头像上即可发送。
+        // 状态栏按钮不能直接子类化,改由它所在窗口登记拖放类型、拖放消息交给窗口代理(本类)
+        if let buttonWindow = statusItem.button?.window {
+            buttonWindow.registerForDraggedTypes([.fileURL])
+            buttonWindow.delegate = self
+        }
     }
+
+    /// 面板收起时取消固定:下次打开恢复默认行为
+    func popoverDidClose(_ notification: Notification) {
+        if model.panelPinned { model.panelPinned = false }
+    }
+
+    // MARK: - 拖文件到菜单栏图标(窗口代理转发的 NSDraggingDestination 消息)
+
+    func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        guard let button = statusItem.button, !popover.isShown else { return [] }
+        model.refresh()
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+        return []   // 图标本身不接收文件,只负责弹出面板
+    }
+
+    func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { [] }
+    func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool { false }
+    func performDragOperation(_ sender: NSDraggingInfo) -> Bool { false }
 
     /// 左键开关弹出面板;右键临时挂上传统菜单并弹出,用完摘掉(否则左键也会出菜单)。
     @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
@@ -258,6 +298,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    /// “发送文件”窗口:普通窗口,切换应用不会收起,适合一次发多个文件
+    func showSendWindow() {
+        if sendWindow == nil {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 520),
+                             styleMask: [.titled, .closable, .resizable, .miniaturizable],
+                             backing: .buffered, defer: false)
+            w.title = "ProtoSync · 发送文件"
+            w.appearance = NSAppearance(named: .darkAqua)   // 与菜单栏面板同为深色
+            w.contentView = NSHostingView(rootView: SendWindowView(model: model))
+            w.center()
+            w.isReleasedWhenClosed = false
+            w.setFrameAutosaveName("ProtoSyncSendWindow")
+            sendWindow = w
+        }
+        model.refresh()
+        sendWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     @objc private func toggleBackgroundReading() {
         backgroundReading.toggle()
         updateNapActivity()
@@ -278,6 +337,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let online = model?.onlinePeers ?? []
         menu.addItem(withTitle: "\(online.count) 台设备在线", action: nil, keyEquivalent: "")
         menu.addItem(.separator())
+        menu.addItem(withTitle: "发送文件窗口…", action: #selector(openSendWindowFromMenu), keyEquivalent: "")
         menu.addItem(withTitle: "设备与设置…", action: #selector(showWindow), keyEquivalent: ",")
         let bgItem = menu.addItem(withTitle: "后台读取剪贴板(全局)",
                                   action: #selector(toggleBackgroundReading), keyEquivalent: "")
@@ -310,6 +370,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func showWindow() { showMainWindow() }
+    @objc private func openSendWindowFromMenu() { showSendWindow() }
 
     @objc private func sendFileToPeer(_ sender: NSMenuItem) {
         guard let fp = sender.representedObject as? String else { return }

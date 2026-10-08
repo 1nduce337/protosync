@@ -45,6 +45,8 @@ final class AppModel: ObservableObject, SyncEngine.Delegate {
     /// 菜单栏面板展示的条数,也是内存里保留的上限
     static let clipHistoryLimit = 6
     @Published var isRefreshing = false
+    /// 固定菜单栏面板:切到其他应用(如在访达里选文件)时不自动收起
+    @Published var panelPinned = false
 
     struct PairingRequest: Identifiable {
         let id = UUID()
@@ -123,14 +125,25 @@ final class AppModel: ObservableObject, SyncEngine.Delegate {
 
     // MARK: - 操作(视图调用)
 
+    /// 选择文件发送(可多选)
     func sendFile(to peerFp: String) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = false
-        panel.allowsMultipleSelection = false
-        panel.message = "选择要发送的文件"
+        panel.allowsMultipleSelection = true
+        panel.message = "选择要发送的文件（可多选）"
         NSApp.activate(ignoringOtherApps: true)
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        engine.sendFile(at: url, to: peerFp)
+        guard panel.runModal() == .OK else { return }
+        sendFiles(panel.urls, to: peerFp)
+    }
+
+    /// 发送多个文件;文件夹暂不支持(单文件协议),返回实际发出的个数
+    @discardableResult
+    func sendFiles(_ urls: [URL], to peerFp: String) -> Int {
+        let files = urls.filter { url in
+            url.isFileURL && (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) != true
+        }
+        files.forEach { engine.sendFile(at: $0, to: peerFp) }
+        return files.count
     }
 
     func pairWith(shortFp: String) {

@@ -3,7 +3,20 @@
 Shared status between Claude Code sessions (local Mac and cloud). Update before ending a session.
 No private data here — see "Privacy" in `CLAUDE.md`.
 
-_Last updated: 2026-10-01 (cloud session: merged into `main` for the 0.0.1 release)_
+_Last updated: 2026-10-08 (cloud session, `feat/send-window`)_
+
+## In progress: send window + panel pinning (branch `feat/send-window`, cloud; Swift unverified)
+
+- **Bug (user):** opening the menu-bar panel, then clicking a file in Finder to drag it, closed the panel (`NSPopover.behavior = .transient` closes on any outside click).
+- **Fixes:**
+  - **Pin button** in the panel header (`AppModel.panelPinned`): while on, `popover.behavior = .applicationDefined`, so it stays open. `popoverDidClose` resets it.
+  - **Drag a file onto the menu-bar icon → the panel opens.** The status-bar button's window registers `.fileURL`, and `AppDelegate` (the window's delegate, `NSDraggingDestination`) shows the popover in `draggingEntered`. ⚠️ Relies on NSWindow forwarding drag messages to its delegate; if it doesn't fire, the pin button still covers the bug.
+- **New "发送文件" window** (`Sources/ProtoSyncApp/SendWindow.swift`): one big drop tile per device (many files at once, click for a multi-select picker), request cards, and the last 30 file transfers. Opened from the gear menu, the panel footer ("发送窗口") and the right-click menu. Frame is autosaved.
+- `AppModel.sendFile(to:)` now allows multiple selection. New `sendFiles(_:to:)` (skips folders) is shared by the panel avatars and the window tiles. Files are sent concurrently by the engine, as panel drops already were.
+- ⚠️ **Unverified:** `swift build`, then by hand:
+  1. pin the panel, click a file in Finder: the panel stays; unpinned, it closes as before;
+  2. drag a file onto the menu-bar icon: the panel opens; drop it on an avatar;
+  3. 发送文件 window: drop 3 files on a device tile; all three show in 传输 and arrive.
 
 ## Release 0.0.1 (now on `main`)
 

@@ -17,4 +17,6 @@ extension AppModel {
 
     /// 进行中的传输(活动流里带进度条目的就是真实传输状态)
     var activeTransfers: [ActivityEntry] { activities.filter { $0.progress != nil } }
+    /// 发送窗口展示的文件传输(进行中与最近完成的),最新在前
+    var recentFileTransfers: [ActivityEntry] { Array(activities.filter { $0.kind == .file }.prefix(30)) }
 }

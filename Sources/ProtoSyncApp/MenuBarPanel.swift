@@ -8,6 +8,7 @@ import Core
 struct MenuBarPanel: View {
     @ObservedObject var model: AppModel
     var openSettings: () -> Void
+    var openSendWindow: () -> Void
     var quit: () -> Void
     @State private var showNearby = false
 
@@ -49,7 +50,20 @@ struct MenuBarPanel: View {
             .controlSize(.mini)
             .tint(Panel.accent)
             .help("关闭后本机复制的内容不再发给其他设备，仍会接收其他设备的剪贴板")
+            Button {
+                model.panelPinned.toggle()
+            } label: {
+                Image(systemName: model.panelPinned ? "pin.fill" : "pin")
+                    .font(.system(size: 12))
+                    .foregroundStyle(model.panelPinned ? AnyShapeStyle(Panel.accent) : AnyShapeStyle(.secondary))
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(model.panelPinned ? "取消固定：点面板以外的地方时收起" : "固定面板：去访达里选文件时面板不会收起")
+            .accessibilityLabel(model.panelPinned ? "取消固定面板" : "固定面板")
             Menu {
+                Button("发送文件窗口…", action: openSendWindow)
                 Button("设备与设置…", action: openSettings)
                 Button("打开收件箱") { model.revealInbox() }
                 Divider()
@@ -195,6 +209,11 @@ struct MenuBarPanel: View {
         HStack {
             Text("拖文件到头像即可发送").font(.system(size: 11)).foregroundStyle(.secondary)
             Spacer()
+            Button("发送窗口", action: openSendWindow)
+                .buttonStyle(.plain)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
+                .help("在独立窗口里发送文件，适合一次发送多个")
             Button("打开收件箱") { model.revealInbox() }
                 .buttonStyle(.plain)
                 .font(.system(size: 11))
@@ -247,13 +266,7 @@ struct PanelDeviceAvatar: View {
         .help(row.online ? "点按选择文件，或把文件拖到这里发送给 \(row.name)" : "\(row.name) 当前离线")
         .dropDestination(for: URL.self) { urls, _ in
             guard row.online else { return false }
-            // 只发普通文件:文件夹暂不支持(单文件协议)
-            let files = urls.filter { url in
-                url.isFileURL && (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) != true
-            }
-            guard !files.isEmpty else { return false }
-            files.forEach { model.engine.sendFile(at: $0, to: row.fingerprint) }
-            return true
+            return model.sendFiles(urls, to: row.fingerprint) > 0
         } isTargeted: { hovering in
             targeted = hovering && row.online
         }
