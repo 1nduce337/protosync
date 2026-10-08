@@ -18,6 +18,26 @@ _Last updated: 2026-10-08 (cloud session, `feat/send-window`)_
   2. drag a file onto the menu-bar icon: the panel opens; drop it on an avatar;
   3. 发送文件 window: drop 3 files on a device tile; all three show in 传输 and arrive.
 
+### Round 2 (cloud; Swift unverified): panel stays open by default, full main window
+
+The user clarified both requests (Round 1 above is superseded where they differ):
+- **Panel:** the pin was the wrong fix; clicking another window should simply not close the panel.
+  - The pin button and `AppModel.panelPinned` are removed.
+  - The popover is now `.applicationDefined` by default. It closes on a second icon click, on Esc (local key monitor, works while ProtoSync is active), or when a panel button opens a window.
+  - New setting 设备与设置 › 菜单栏面板 › "点击其他地方时收起" (`UserDefaults` `panelClosesOnOutsideClick`, default off) switches back to `.transient`. It is applied live through the existing `UserDefaults` observer.
+  - Dragging onto the menu-bar icon is unchanged from Round 1.
+- **Window:** `SendWindow.swift` was replaced by `MainWindow.swift` (`MainWindowView`), a complete version of the panel in the same style (spec: "Main window" in `docs/design/MENUBAR_PANEL.md`):
+  - header with the clipboard switch and settings;
+  - request cards;
+  - device tile grid (multi-file drop, picker, context menu, remove confirmation) plus a pairing tile with the nearby list;
+  - 传输 and 剪贴板历史 side by side (`ViewThatFits`), then 收到的文件.
+  - It reuses `SettingsSection` / `SettingsRow` / `PanelClipRow` / the panel cards.
+  - Opened via "打开窗口" (panel footer) or "打开主窗口…" (gear and right-click menus). Window title "ProtoSync", frame autosaved.
+- ⚠️ **Unverified:** `swift build`, then:
+  1. open the panel, click a Finder window: the panel stays; Esc or an icon click closes it; turning the setting on restores auto-close;
+  2. main window: drop several files on a tile; the transfers list fills; history rows copy; inbox rows open on double-click;
+  3. narrow the window: the two columns stack.
+
 ## Release 0.0.1 (now on `main`)
 
 - `feat/menubar-popover-ui` (Rounds 2–11) and `chore/cleanup` are merged into `main`. The user chose to skip most of the manual checks.

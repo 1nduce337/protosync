@@ -8,7 +8,7 @@ import Core
 struct MenuBarPanel: View {
     @ObservedObject var model: AppModel
     var openSettings: () -> Void
-    var openSendWindow: () -> Void
+    var openMainWindow: () -> Void
     var quit: () -> Void
     @State private var showNearby = false
 
@@ -50,20 +50,8 @@ struct MenuBarPanel: View {
             .controlSize(.mini)
             .tint(Panel.accent)
             .help("关闭后本机复制的内容不再发给其他设备，仍会接收其他设备的剪贴板")
-            Button {
-                model.panelPinned.toggle()
-            } label: {
-                Image(systemName: model.panelPinned ? "pin.fill" : "pin")
-                    .font(.system(size: 12))
-                    .foregroundStyle(model.panelPinned ? AnyShapeStyle(Panel.accent) : AnyShapeStyle(.secondary))
-                    .frame(width: 20, height: 20)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(model.panelPinned ? "取消固定：点面板以外的地方时收起" : "固定面板：去访达里选文件时面板不会收起")
-            .accessibilityLabel(model.panelPinned ? "取消固定面板" : "固定面板")
             Menu {
-                Button("发送文件窗口…", action: openSendWindow)
+                Button("打开主窗口…", action: openMainWindow)
                 Button("设备与设置…", action: openSettings)
                 Button("打开收件箱") { model.revealInbox() }
                 Divider()
@@ -209,11 +197,11 @@ struct MenuBarPanel: View {
         HStack {
             Text("拖文件到头像即可发送").font(.system(size: 11)).foregroundStyle(.secondary)
             Spacer()
-            Button("发送窗口", action: openSendWindow)
+            Button("打开窗口", action: openMainWindow)
                 .buttonStyle(.plain)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
-                .help("在独立窗口里发送文件，适合一次发送多个")
+                .help("在完整窗口里查看设备、传输、剪贴板历史与收到的文件")
             Button("打开收件箱") { model.revealInbox() }
                 .buttonStyle(.plain)
                 .font(.system(size: 11))

@@ -11,6 +11,7 @@ struct SettingsView: View {
     // 与 AppDelegate / 右键菜单读写同一组 UserDefaults 键
     @AppStorage("backgroundClipboardReading") private var backgroundReading = true
     @AppStorage(Notifier.syncNotifyKey) private var syncNotify = false
+    @AppStorage("panelClosesOnOutsideClick") private var panelAutoClose = false
     /// 系统设置里关掉了本 App 的通知(开关打开也不会弹),显示去设置的提示
     @State private var notificationsBlocked = false
     @State private var pendingRemoval: DeviceRow?
@@ -30,6 +31,7 @@ struct SettingsView: View {
                 }
                 pairedSection
                 nearbySection
+                panelSection
                 clipboardSection
                 filesSection
             }
@@ -197,6 +199,15 @@ struct SettingsView: View {
                         .frame(width: 64)
                 }
             }
+        }
+    }
+
+    // MARK: - 菜单栏面板
+
+    private var panelSection: some View {
+        SettingsSection("菜单栏面板") {
+            toggleRow("点击其他地方时收起", detail: "默认关闭：切到访达拖文件时面板保持打开，按 Esc 或再点图标收起",
+                      isOn: $panelAutoClose)
         }
     }
 

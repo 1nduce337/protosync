@@ -45,8 +45,6 @@ final class AppModel: ObservableObject, SyncEngine.Delegate {
     /// 菜单栏面板展示的条数,也是内存里保留的上限
     static let clipHistoryLimit = 6
     @Published var isRefreshing = false
-    /// 固定菜单栏面板:切到其他应用(如在访达里选文件)时不自动收起
-    @Published var panelPinned = false
 
     struct PairingRequest: Identifiable {
         let id = UUID()

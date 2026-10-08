@@ -32,35 +32,26 @@ Anything that needs a decision appears in the panel, and nothing else asks for a
 Right-clicking the menu-bar icon keeps the classic menu.
 
 **Keeping the panel open while picking files:**
-- **Pin button** in the header (`pin` / `pin.fill`, Lime when on): the popover switches from `.transient` to `.applicationDefined`, so clicking in Finder no longer closes it. Closing the panel unpins it.
-- **Dragging a file onto the menu-bar icon** opens the panel, so the drag can continue onto a device avatar.
+- By default the popover is `.applicationDefined`: clicking another app (e.g. Finder, to start a drag) doesn't close it. It closes on a second click on the menu-bar icon, on Esc, or when one of its own buttons opens a window.
+- Settings › 菜单栏面板 › "点击其他地方时收起" (`panelClosesOnOutsideClick`, default off) switches back to `.transient`.
+- Dragging a file onto the menu-bar icon opens the panel, so the drag can continue onto a device avatar.
 
-## 发送文件 window (macOS)
+## Main window (macOS)
 
-A regular window (gear menu / footer "发送窗口" / right-click menu) for sending several files at once. It doesn't close when you switch apps.
-- Each paired device is a large tile (adaptive grid, 150 pt min): it is a drop target for many files at once, and clicking it opens a multi-select file picker. A Lime ring and "松开即发送" show the drop target; offline tiles are dimmed and disabled.
-- Pending pairing / file requests use the same cards as the panel.
-- "传输" lists the last 30 file transfers, with progress bars, "等待对方确认" or the final status.
-- Footer: "文件夹暂不支持，请先压缩。" and the inbox link.
+The full version of the panel: everything the panel does, with more room. Opened from the panel footer ("打开窗口"), the gear menu and the right-click menu ("打开主窗口…"). It is a regular window, so it stays open while you pick files in Finder. Same visual rules as the panel and the settings window: always dark, `white 6%` fill groups with 10 pt corners, 11 pt section titles; Lime only for online dots, drop rings, progress, and the inbox link.
 
-**Menu-bar icon feedback:** the logo template icon briefly changes, and the tooltip says what happened.
-- **Sent** (this Mac's copy synced): `arrow.up.circle.fill`, template, 1.5 s.
-- **Received** (clipboard or file from another device): `arrow.down.circle.fill`, ink arrow on a Lime circle, 3 s. This is the one place Lime appears in the menu bar: receiving changes your clipboard, so it should be noticed.
-- The optional "同步时发送通知" switch adds system banners for both. The full window is now "设备与设置", opened from the gear menu or the right-click menu, and no longer opens at launch.
-
-## Visual rules
-
-- The panel is always dark (`darkAqua`) and sits on the system popover material. There are no custom panel backgrounds or borders.
-- **One accent: Lime `#E7FF16`.** Use it only for:
-  - primary buttons (ink `#15181B` text on lime);
-  - online dots;
-  - drop-target rings;
-  - progress fills;
-  - the inbox link.
-- Grouping uses fills (`white 6%` / `11%`), not outlines: no 1 px borders around every section.
-- Type: the system font only. 13 pt for the title, 12 pt for body, 11 pt for secondary, 10 pt for metadata. Use monospaced digits only for fingerprints and percentages.
-- Copy is Chinese only, with no English tags. Drop "SCAN", "ONLINE", "IDLE", zero-padded counts, dot grids and cut corners.
-- Status is never shown by color alone: offline devices are also dimmed and say "离线" in the tooltip and accessibility label.
+Top to bottom:
+- **Header:** this Mac's circle, its name, "N 台设备在线 · 复制即同步", the 同步剪贴板 switch and a "设备与设置…" button.
+- **Requests:** the same pairing / outgoing pairing / file request cards as the panel.
+- **设备:** an adaptive grid of 150 pt tiles.
+  - Each tile is a drop target for many files at once, with a Lime ring and "松开即发送" while hovering.
+  - Click a tile for a multi-select picker; the right-click menu has send / 自动接收文件 / remove (confirmed).
+  - The subtitle says "需对方确认" when auto-receive is off on the other side.
+  - A dashed "配对新设备" tile opens the 附近的设备 list below the grid.
+- **传输 | 剪贴板历史:** two columns on wide windows, stacked on narrow ones.
+  - 传输: the last 30 file transfers, with progress, "等待对方确认" or the final status.
+  - 剪贴板历史: the same click-to-copy rows as the panel.
+- **收到的文件:** the 8 newest inbox files with icon, name and relative time. On hover there are 打开 / 显示 buttons, and a double-click opens the file.
 
 ## 设备与设置 window (macOS)
 
@@ -77,6 +68,7 @@ Contents, top to bottom:
 - **Pending requests:** the same `PanelPairingCard` / `PanelOfferCard` the panel uses.
 - **已配对设备:** 34 pt avatars, status and short fingerprint, the "自动接收" switch, and a ⋯ / right-click menu to remove (confirmed).
 - **附近的设备**, with a quiet "重新查找" link.
+- **菜单栏面板:** "点击其他地方时收起" (default off).
 - **剪贴板:** three switches, each with a one-line explanation.
 - **收到的文件:** the folder and the 5 most recent files.
 

@@ -18,7 +18,7 @@ private data** — see "Privacy" below.
 | Path | What |
 |---|---|
 | `Sources/Core/` | Swift protocol stack, platform-independent (used by macOS and iOS) |
-| `Sources/ProtoSyncApp/` | macOS menu-bar app (SwiftUI). `MenuBarPanel` = the popover (main UI); `SettingsView` = the 设备与设置 window; `PanelStyle` = shared tokens (also compiled by iOS) |
+| `Sources/ProtoSyncApp/` | macOS menu-bar app (SwiftUI). `MenuBarPanel` = the popover (main UI); `MainWindow` = its full-window version; `SettingsView` = the 设备与设置 window; `PanelStyle` = shared tokens (also compiled by iOS) |
 | `Sources/protosync-peer/` | CLI test peer |
 | `Sources/protosync-tests/` | Test runner (plain executable — no XCTest in a Command Line Tools setup) |
 | `ios/` | iOS app (xcodegen project + SwiftUI), reuses `Core` |
